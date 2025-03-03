@@ -9,7 +9,7 @@ def parse_opt():
     parser.add_argument('--batch_size', type=int, default=16, help='batch size')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--task', default='train', help='train, val, test, speed or study')
-    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1 or cpu')
+    parser.add_argument('--device', default='1', help='cuda device, i.e. 0 or 0,1 or cpu')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--workers', type=int, default=16, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')
@@ -40,6 +40,6 @@ if __name__ == '__main__':
     task_type = {
         "train": YOLO(model_conf).train(**args),
         "val": YOLO(model_conf).val(**args),
-        # "test": YOLO(model_conf).test(**args),
+        "test": YOLO(model_conf).test(**args),
     }
     task_type.get(task)
