@@ -51,7 +51,11 @@ from ultralytics.nn.modules import (
     SimpleStem,
     VisionClueMerge,
     VSSBlock,
-    XSSBlock
+    XSSBlock,
+    PSA,
+    C2PSA,
+    C2fPSA,
+
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -898,6 +902,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             DWConvTranspose2d,
             C3x,
             RepC3,
+            PSA, C2PSA, C2fPSA,
             SimpleStem, VisionClueMerge, VSSBlock, XSSBlock
         }:
             c1, c2 = ch[f], args[0]
@@ -910,7 +915,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 )  # num heads
 
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, XSSBlock}:
+            if m in {BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, XSSBlock, C2PSA, C2fPSA}:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is AIFI:

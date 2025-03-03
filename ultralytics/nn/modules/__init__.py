@@ -46,6 +46,10 @@ from .block import (
     RepNCSPELAN4,
     ResNetLayer,
     Silence,
+    Attention,
+    PSA,
+    C2PSA,
+    C2fPSA,
 )
 from .conv import (
     CBAM,
@@ -137,5 +141,6 @@ __all__ = (
     "CBFuse",
     "CBLinear",
     "Silence",
+    "Attention", "PSA", "C2PSA", "C2fPSA",
     "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock"
 )
