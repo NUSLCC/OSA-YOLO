@@ -50,6 +50,8 @@ from .block import (
     PSA,
     C2PSA,
     C2fPSA,
+    A2C2f,
+
 )
 from .conv import (
     CBAM,
@@ -142,5 +144,6 @@ __all__ = (
     "CBLinear",
     "Silence",
     "Attention", "PSA", "C2PSA", "C2fPSA",
-    "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock"
+    "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock",
+    "A2C2f",
 )
