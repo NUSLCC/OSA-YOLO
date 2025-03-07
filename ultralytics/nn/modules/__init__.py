@@ -52,6 +52,7 @@ from .block import (
     C2fPSA,
     A2C2f,
     C3k2,
+    HybridMambaAA,
 
 )
 from .conv import (
@@ -146,6 +147,7 @@ __all__ = (
     "Silence",
     "Attention", "PSA", "C2PSA", "C2fPSA",
     "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock",
-    "A2C2f",
     "C3k2",
+    "A2C2f",
+    "HybridMambaAA",
 )
