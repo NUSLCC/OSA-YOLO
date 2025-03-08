@@ -1100,8 +1100,8 @@ class A2C2f(nn.Module):
             shortcut (bool): Whether to use shortcut connections in C3k blocks.
         """
         super().__init__()
-        # print("AAc1:", c1)
-        # print("AAc2:", c2)
+        # # print("AAc1:", c1)
+        # # print("AAc2:", c2)
         c_ = int(c2 * e)  # hidden channels
         assert c_ % 32 == 0, "Dimension of ABlock be a multiple of 32."
 
@@ -1159,7 +1159,9 @@ class HybridMambaAA(nn.Module):
         assert c1 % 2 == 0
         self.c_ = c1 // 2
         # Branch 1: VSSBlock branch (global context)
-        self.vss_branch = VSSBlock(self.c_, self.c_)
+        # print("Hc1:", c1)
+        # print("Hc2:", c2)
+        self.vss_branch = VSSBlock(c1, c2)
         
         # Branch 2: A2C2f branch (area-attention + residual feature aggregation)
         self.a2c2f_branch = A2C2f(self.c_, self.c_, n, a2, area, residual, mlp_ratio, e, g, shortcut)
