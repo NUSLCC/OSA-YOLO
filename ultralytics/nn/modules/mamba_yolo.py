@@ -322,7 +322,7 @@ class VSSBlock(nn.Module):
             # =============================
             mlp_ratio=4.0,
             mlp_act_layer=nn.GELU,
-            mlp_drop_rate: float = 0.0,
+            mlp_drop_rate: float = 0.1,
             # =============================
             use_checkpoint: bool = False,
             post_norm: bool = False,
