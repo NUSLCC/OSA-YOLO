@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
-from .mamba_yolo import VSSBlock
+from .mamba_yolo import VSSBlock, VSSBlockOmni
 
 __all__ = (
     "DFL",
