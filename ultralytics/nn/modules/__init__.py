@@ -51,6 +51,8 @@ from .block import (
     C2PSA,
     C2fPSA,
     A2C2f,
+    C3k2,
+    HybridMambaAA,
 
 )
 from .conv import (
@@ -82,7 +84,7 @@ from .transformer import (
     TransformerLayer,
 )
 
-from .mamba_yolo import SimpleStem, VisionClueMerge, VSSBlock, XSSBlock
+from .mamba_yolo import SimpleStem, VisionClueMerge, VSSBlock, XSSBlock, VSSBlockOmni
 
 __all__ = (
     "Conv",
@@ -144,6 +146,8 @@ __all__ = (
     "CBLinear",
     "Silence",
     "Attention", "PSA", "C2PSA", "C2fPSA",
-    "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock",
+    "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock", "VSSBlockOmni",
+    "C3k2",
     "A2C2f",
+    "HybridMambaAA",
 )

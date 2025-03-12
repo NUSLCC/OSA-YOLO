@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
+from .mamba_yolo import VSSBlock, VSSBlockOmni
 
 __all__ = (
     "DFL",
@@ -41,7 +42,7 @@ __all__ = (
     "PSA",
     "C2PSA",
     "C2fPSA",
-
+    "C3k2",
 )
 
 
@@ -910,6 +911,17 @@ class C3k(C3):
         self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
 
 
+class C3k2(C2f):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        """Initializes the C3k2 module, a faster CSP Bottleneck with 2 convolutions and optional C3k blocks."""
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
+        )
+
+
 class AAttn(nn.Module):
     """
     Area-attention module for YOLO models, providing efficient attention mechanisms.
@@ -1088,6 +1100,8 @@ class A2C2f(nn.Module):
             shortcut (bool): Whether to use shortcut connections in C3k blocks.
         """
         super().__init__()
+        # print("AAc1:", c1)
+        # print("AAc2:", c2)
         c_ = int(c2 * e)  # hidden channels
         assert c_ % 32 == 0, "Dimension of ABlock be a multiple of 32."
 
@@ -1111,3 +1125,50 @@ class A2C2f(nn.Module):
             return x + self.gamma.view(-1, len(self.gamma), 1, 1) * y
         return y
 
+
+class HybridMambaAA(nn.Module):
+    """
+    A hybrid block combining a VSSBlock branch (global context via SSM-based selective scanning)
+    and an A2C2f branch (local refinement via area-attention and residual aggregation).
+    
+    The outputs from both branches are fused (here via concatenation followed by a 1x1 convolution)
+    to yield a combined feature representation.
+    
+    Args:
+        in_channels (int): Number of input channels.
+        out_channels (int): Number of output channels.
+        vss_args (dict, optional): Additional arguments for VSSBlock.
+        a2c2f_args (dict, optional): Additional arguments for A2C2f.
+    """
+    def __init__(self, c1, c2, n=1, a2=True, area=1, residual=False, mlp_ratio=2.0, e=0.5, g=1, shortcut=True):
+        super().__init__()
+        # vss_args = vss_args or {}
+        # a2c2f_args = a2c2f_args or {
+        #     "n": 1,
+        #     "a2": True,
+        #     "area": 1,
+        #     "residual": False,
+        #     "mlp_ratio": 2.0,
+        #     "e": 0.5,
+        #     "g": 1,
+        #     "shortcut": True
+        # }
+        # Branch 1: VSSBlock branch (global context)
+        # print("Hc1:", c1)
+        # print("Hc2:", c2)
+        self.vss_branch = VSSBlock(c1, c2)
+        
+        # Branch 2: A2C2f branch (area-attention + residual feature aggregation)
+        self.a2c2f_branch = A2C2f(c1, c2, n, a2, area, residual, mlp_ratio, e, g, shortcut)
+        
+        # Fusion layer: fuse concatenated features (2*out_channels -> out_channels)
+        self.fuse_conv = Conv(2 * c2, c2, k=1, s=1)
+        
+    def forward(self, x):
+        # Compute outputs from each branch
+        feat_vss = self.vss_branch(x)
+        feat_a2c2f = self.a2c2f_branch(x)
+        # Fuse along channel dimension
+        fused = torch.cat([feat_vss, feat_a2c2f], dim=1)
+        fused = self.fuse_conv(fused)
+        return fused
