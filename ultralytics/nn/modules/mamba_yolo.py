@@ -80,8 +80,7 @@ class SS2D(nn.Module):
 
         # x proj ============================
         self.x_proj = [
-            nn.Linear(d_inner, (self.dt_rank + self.d_state * 2), bias=False,
-                      **factory_kwargs)
+            nn.Linear(d_inner, (self.dt_rank + self.d_state * 2), bias=False, **factory_kwargs)
             for _ in range(self.K)
         ]
         self.x_proj_weight = nn.Parameter(torch.stack([t.weight for t in self.x_proj], dim=0))  # (K, N, inner)
@@ -519,8 +518,8 @@ class OSSM(nn.Module):
         FORWARD_TYPES = dict(
             # v0=self.forward_corev0,
             # v2=partial(self.forward_corev2, force_fp32=(not self.disable_force32), SelectiveScan=SelectiveScanCore),
-            v2=partial(self.forward_corev2, force_fp32=None, SelectiveScan=SelectiveScanCore),
-            # v3=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex),
+            # v2=partial(self.forward_corev2, force_fp32=None, SelectiveScan=SelectiveScanCore),
+            v3=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex),
             # v31d=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex, cross_selective_scan=partial(cross_selective_scan, CrossScan=CrossScan_Ab_1direction, CrossMerge=CrossMerge_Ab_1direction,)),
             # v32d=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex, cross_selective_scan=partial(cross_selective_scan, CrossScan=CrossScan_Ab_2direction, CrossMerge=CrossMerge_Ab_2direction,)),
             # ===============================
@@ -554,7 +553,7 @@ class OSSM(nn.Module):
         # self.in_proj = nn.Linear(d_model, d_proj, bias=bias, **factory_kwargs)
         self.in_proj = nn.Conv2d(d_model, d_proj, kernel_size=1, stride=1, groups=1, bias=bias, **factory_kwargs)
         # self.act: nn.Module = act_layer()
-        self.act: nn.Module = nn.GELU()
+        self.act: nn.Module = nn.SiLU()
         # conv =======================================
         if d_conv > 1:
             self.conv2d = nn.Conv2d(
@@ -576,8 +575,8 @@ class OSSM(nn.Module):
         del self.x_proj
         
         # out proj =======================================
-        self.out_proj = nn.Conv2d(d_inner, d_model, kernel_size=1, stride=1, bias=bias, **factory_kwargs)
         # self.out_proj = nn.Linear(d_inner, d_model, bias=bias, **factory_kwargs)
+        self.out_proj = nn.Conv2d(d_inner, d_model, kernel_size=1, stride=1, bias=bias, **factory_kwargs)
         self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
 
         if initialize in ["v0"]:
@@ -714,11 +713,11 @@ class OSSM(nn.Module):
 
         return (y.to(x.dtype) if to_dtype else y)
     
-    def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan, force_fp32=None):
+    def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanOflex, cross_selective_scan=cross_selective_scan_omni, force_fp32=None):
         if not channel_first:
             x = x.permute(0, 3, 1, 2).contiguous()
         # ZSJ V2版本使用的mamba，要改扫描方向在这里改
-        x = cross_selective_scan_omni(
+        x = cross_selective_scan(
             x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
             self.A_logs, self.Ds, delta_softplus=True,
             out_norm=getattr(self, "out_norm", None),
