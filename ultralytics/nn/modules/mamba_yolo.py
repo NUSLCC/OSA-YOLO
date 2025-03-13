@@ -476,7 +476,7 @@ class OSSM(nn.Module):
         dt_init_floor=1e-4,
         initialize="v0",
         # ======================
-        forward_type="v2",
+        forward_type="v3",
         # ======================
         **kwargs,
     ):
