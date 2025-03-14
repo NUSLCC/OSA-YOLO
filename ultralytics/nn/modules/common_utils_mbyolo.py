@@ -54,6 +54,7 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
 class CrossScan(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor):
+        # out (B 4 D L)
         B, C, H, W = x.shape
         ctx.shape = (B, C, H, W)
         xs = x.new_empty((B, 4, C, H * W))
@@ -77,9 +78,9 @@ class CrossMerge(torch.autograd.Function):
     def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-        ys = ys.view(B, K, D, -1)
+        ys = ys.view(B, K, D, -1)  # (B K D L)
         ys = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-        y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
+        y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)  # B D L
         return y
 
     @staticmethod
@@ -93,7 +94,7 @@ class CrossMerge(torch.autograd.Function):
         xs[:, 1] = x.view(B, C, H, W).transpose(dim0=2, dim1=3).flatten(2, 3)
         xs[:, 2:4] = torch.flip(xs[:, 0:2], dims=[-1])
         xs = xs.view(B, 4, C, H, W)
-        return xs, None, None
+        return xs
 
 
 # =============
@@ -308,16 +309,20 @@ def cross_selective_scan(
         dt_projs_bias: torch.Tensor = None,
         A_logs: torch.Tensor = None,
         Ds: torch.Tensor = None,
+        delta_softplus = True,
         out_norm: torch.nn.Module = None,
         out_norm_shape="v0",
-        nrows=-1,  # for SelectiveScanNRow
-        backnrows=-1,  # for SelectiveScanNRow
-        delta_softplus=True,
+        # ==============================
         to_dtype=True,
         force_fp32=False,  # False if ssoflex
-        ssoflex=True,
+        # ==============================
+        nrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
+        backnrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
+        ssoflex=True, # True: out fp32 in SSOflex; else, SSOflex is the same as SSCore
+        # ==============================
         SelectiveScan=None,
-        scan_mode_type='default'
+        CrossScan=CrossScan,
+        CrossMerge=CrossMerge,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -325,6 +330,26 @@ def cross_selective_scan(
     D, N = A_logs.shape
     K, D, R = dt_projs_weight.shape
     L = H * W
+
+    if nrows == 0:
+        if D % 4 == 0:
+            nrows = 4
+        elif D % 3 == 0:
+            nrows = 3
+        elif D % 2 == 0:
+            nrows = 2
+        else:
+            nrows = 1
+        
+    if backnrows == 0:
+        if D % 4 == 0:
+            backnrows = 4
+        elif D % 3 == 0:
+            backnrows = 3
+        elif D % 2 == 0:
+            backnrows = 2
+        else:
+            backnrows = 1
 
     def selective_scan(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
         return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
