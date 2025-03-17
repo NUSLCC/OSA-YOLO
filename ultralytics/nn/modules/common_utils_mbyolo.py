@@ -242,8 +242,7 @@ class SelectiveScanCore(torch.autograd.Function):
     # comment all checks if inside cross_selective_scan
     @staticmethod
     @torch.cuda.amp.custom_fwd
-    def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1,
-                oflex=True):
+    def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1, oflex=True):
         # all in float
         if u.stride(-1) != 1:
             u = u.contiguous()

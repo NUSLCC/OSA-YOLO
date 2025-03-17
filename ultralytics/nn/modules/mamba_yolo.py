@@ -264,7 +264,7 @@ class SS2D(nn.Module):
         if self.d_conv > 0:
             x = self.conv2d(x)  # (b, d, h, w)
         x = self.act(x)
-        y = self.forward_core(x, channel_first=(self.d_conv > 1))
+        y = self.forward_core(x, channel_first=(self.d_conv > 1)) # Main SSM computation
         y = y.permute(0, 3, 1, 2).contiguous()
         if not self.disable_z:
             y = y * z
