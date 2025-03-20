@@ -54,6 +54,7 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
 class CrossScan(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor):
+        # out (B 4 D L)
         B, C, H, W = x.shape
         ctx.shape = (B, C, H, W)
         xs = x.new_empty((B, 4, C, H * W))
@@ -77,9 +78,9 @@ class CrossMerge(torch.autograd.Function):
     def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-        ys = ys.view(B, K, D, -1)
+        ys = ys.view(B, K, D, -1)  # (B K D L)
         ys = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-        y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
+        y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)  # B D L
         return y
 
     @staticmethod
@@ -95,146 +96,6 @@ class CrossMerge(torch.autograd.Function):
         xs = xs.view(B, 4, C, H, W)
         return xs, None, None
 
-
-# =============
-def antidiagonal_gather(tensor):
-    # 取出矩阵所有反斜向的元素并拼接
-    B, C, H, W = tensor.size()
-    shift = torch.arange(H, device=tensor.device).unsqueeze(1)  # 创建一个列向量[H, 1]
-    index = (torch.arange(W, device=tensor.device) - shift) % W  # 利用广播创建索引矩阵[H, W]
-    # 扩展索引以适应B和C维度
-    expanded_index = index.unsqueeze(0).unsqueeze(0).expand(B, C, -1, -1)
-    # 使用gather进行索引选择
-    return tensor.gather(3, expanded_index).transpose(-1,-2).reshape(B, C, H*W)
-
-def diagonal_gather(tensor):
-    # 取出矩阵所有反斜向的元素并拼接
-    B, C, H, W = tensor.size()
-    shift = torch.arange(H, device=tensor.device).unsqueeze(1)  # 创建一个列向量[H, 1]
-    index = (shift + torch.arange(W, device=tensor.device)) % W  # 利用广播创建索引矩阵[H, W]
-    # 扩展索引以适应B和C维度
-    expanded_index = index.unsqueeze(0).unsqueeze(0).expand(B, C, -1, -1)
-    # 使用gather进行索引选择
-    return tensor.gather(3, expanded_index).transpose(-1,-2).reshape(B, C, H*W)
-
-def diagonal_scatter(tensor_flat, original_shape):
-    # 把斜向元素拼接起来的一维向量还原为最初的矩阵形式
-    B, C, H, W = original_shape
-    shift = torch.arange(H, device=tensor_flat.device).unsqueeze(1)  # 创建一个列向量[H, 1]
-    index = (shift + torch.arange(W, device=tensor_flat.device)) % W  # 利用广播创建索引矩阵[H, W]
-    # 扩展索引以适应B和C维度
-    expanded_index = index.unsqueeze(0).unsqueeze(0).expand(B, C, -1, -1)
-    # 创建一个空的张量来存储反向散布的结果
-    result_tensor = torch.zeros(B, C, H, W, device=tensor_flat.device, dtype=tensor_flat.dtype)
-    # 将平铺的张量重新变形为[B, C, H, W]，考虑到需要使用transpose将H和W调换
-    tensor_reshaped = tensor_flat.reshape(B, C, W, H).transpose(-1, -2)
-    # 使用scatter_根据expanded_index将元素放回原位
-    result_tensor.scatter_(3, expanded_index, tensor_reshaped)
-    return result_tensor
-
-def antidiagonal_scatter(tensor_flat, original_shape):
-    # 把反斜向元素拼接起来的一维向量还原为最初的矩阵形式
-    B, C, H, W = original_shape
-    shift = torch.arange(H, device=tensor_flat.device).unsqueeze(1)  # 创建一个列向量[H, 1]
-    index = (torch.arange(W, device=tensor_flat.device) - shift) % W  # 利用广播创建索引矩阵[H, W]
-    expanded_index = index.unsqueeze(0).unsqueeze(0).expand(B, C, -1, -1)
-    # 初始化一个与原始张量形状相同、元素全为0的张量
-    result_tensor = torch.zeros(B, C, H, W, device=tensor_flat.device, dtype=tensor_flat.dtype)
-    # 将平铺的张量重新变形为[B, C, W, H]，因为操作是沿最后一个维度收集的，需要调整形状并交换维度
-    tensor_reshaped = tensor_flat.reshape(B, C, W, H).transpose(-1, -2)
-    # 使用scatter_将元素根据索引放回原位
-    result_tensor.scatter_(3, expanded_index, tensor_reshaped)
-    return result_tensor
-
-class CrossScanOmni(torch.autograd.Function):
-    # ZSJ 这里是把图像按照特定方向展平的地方，改变扫描方向可以在这里修改
-    @staticmethod
-    def forward(ctx, x: torch.Tensor):
-        B, C, H, W = x.shape
-        ctx.shape = (B, C, H, W)
-        # xs = x.new_empty((B, 4, C, H * W))
-        xs = x.new_empty((B, 8, C, H * W))
-        # 添加横向和竖向的扫描
-        xs[:, 0] = x.flatten(2, 3)
-        xs[:, 1] = x.transpose(dim0=2, dim1=3).flatten(2, 3)
-        xs[:, 2:4] = torch.flip(xs[:, 0:2], dims=[-1])
-    
-        # 提供斜向和反斜向的扫描
-        xs[:, 4] = diagonal_gather(x)
-        xs[:, 5] = antidiagonal_gather(x)
-        xs[:, 6:8] = torch.flip(xs[:, 4:6], dims=[-1])
-
-        return xs
-    
-    @staticmethod
-    def backward(ctx, ys: torch.Tensor):
-        # out: (b, k, d, l)
-        B, C, H, W = ctx.shape
-        L = H * W
-        # 把横向和竖向的反向部分再反向回来，并和原来的横向和竖向相加
-        # ys = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, -1, L)
-        y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, -1, L)
-        # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
-        # y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, -1, L)
-        y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, -1, L)
-        y_rb = y_rb.view(B, -1, H, W)
-
-        # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
-        y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, -1, L)
-        # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
-        y_da = diagonal_scatter(y_da[:, 0], (B,C,H,W)) + antidiagonal_scatter(y_da[:, 1], (B,C,H,W))
-
-        y_res = y_rb + y_da
-        # return y.view(B, -1, H, W)
-        return y_res
-
-
-class CrossMergeOmni(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, ys: torch.Tensor):
-        B, K, D, H, W = ys.shape
-        ctx.shape = (H, W)
-        ys = ys.view(B, K, D, -1)
-        # ys = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-        # y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
-
-        y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-        # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
-        y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
-        y_rb = y_rb.view(B, -1, H, W)
-
-        # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
-        y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, D, -1)
-        # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
-        y_da = diagonal_scatter(y_da[:, 0], (B,D,H,W)) + antidiagonal_scatter(y_da[:, 1], (B,D,H,W))
-
-        y_res = y_rb + y_da
-        return y_res.view(B, D, -1)
-        # return y
-    
-    @staticmethod
-    def backward(ctx, x: torch.Tensor):
-        # B, D, L = x.shape
-        # out: (b, k, d, l)
-        H, W = ctx.shape
-        B, C, L = x.shape
-        # xs = x.new_empty((B, 4, C, L))
-        xs = x.new_empty((B, 8, C, L))
-
-        # 横向和竖向扫描
-        xs[:, 0] = x
-        xs[:, 1] = x.view(B, C, H, W).transpose(dim0=2, dim1=3).flatten(2, 3)
-        xs[:, 2:4] = torch.flip(xs[:, 0:2], dims=[-1])
-        # xs = xs.view(B, 4, C, H, W)
-
-        # 提供斜向和反斜向的扫描
-        xs[:, 4] = diagonal_gather(x.view(B,C,H,W))
-        xs[:, 5] = antidiagonal_gather(x.view(B,C,H,W))
-        xs[:, 6:8] = torch.flip(xs[:, 4:6], dims=[-1])
-
-        # return xs
-        return xs.view(B, 8, C, H, W)
-# =============
 
 # cross selective scan ===============================
 # class SelectiveScanCore(torch.autograd.Function):
@@ -282,7 +143,25 @@ class SelectiveScanCore(torch.autograd.Function):
     # comment all checks if inside cross_selective_scan
     @staticmethod
     @torch.cuda.amp.custom_fwd
-    def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1, oflex=True):
+    def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1,
+                oflex=True):
+        # all in float
+        if u.stride(-1) != 1:
+            u = u.contiguous()
+        if delta.stride(-1) != 1:
+            delta = delta.contiguous()
+        if D is not None and D.stride(-1) != 1:
+            D = D.contiguous()
+        if B.stride(-1) != 1:
+            B = B.contiguous()
+        if C.stride(-1) != 1:
+            C = C.contiguous()
+        if B.dim() == 3:
+            B = B.unsqueeze(dim=1)
+            ctx.squeeze_B = True
+        if C.dim() == 3:
+            C = C.unsqueeze(dim=1)
+            ctx.squeeze_C = True
         ctx.delta_softplus = delta_softplus
         out, x, *rest = selective_scan_cuda_core.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1)
         ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
@@ -300,6 +179,28 @@ class SelectiveScanCore(torch.autograd.Function):
         return (du, ddelta, dA, dB, dC, dD, ddelta_bias, None, None, None, None)
 
 
+class SelectiveScanOflex(torch.autograd.Function):
+    # comment all checks if inside cross_selective_scan
+    @staticmethod
+    @torch.cuda.amp.custom_fwd
+    def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1, oflex=True):
+        ctx.delta_softplus = delta_softplus
+        out, x, *rest = selective_scan_cuda_oflex.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1, oflex)
+        ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
+        return out
+    
+    @staticmethod
+    @torch.cuda.amp.custom_bwd
+    def backward(ctx, dout, *args):
+        u, delta, A, B, C, D, delta_bias, x = ctx.saved_tensors
+        if dout.stride(-1) != 1:
+            dout = dout.contiguous()
+        du, ddelta, dA, dB, dC, dD, ddelta_bias, *rest = selective_scan_cuda_oflex.bwd(
+            u, delta, A, B, C, D, delta_bias, dout, x, ctx.delta_softplus, 1
+        )
+        return (du, ddelta, dA, dB, dC, dD, ddelta_bias, None, None, None, None)
+
+
 def cross_selective_scan(
         x: torch.Tensor = None,
         x_proj_weight: torch.Tensor = None,
@@ -308,16 +209,20 @@ def cross_selective_scan(
         dt_projs_bias: torch.Tensor = None,
         A_logs: torch.Tensor = None,
         Ds: torch.Tensor = None,
+        delta_softplus = True,
         out_norm: torch.nn.Module = None,
         out_norm_shape="v0",
-        nrows=-1,  # for SelectiveScanNRow
-        backnrows=-1,  # for SelectiveScanNRow
-        delta_softplus=True,
+        # ==============================
         to_dtype=True,
         force_fp32=False,  # False if ssoflex
-        ssoflex=True,
+        # ==============================
+        nrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
+        backnrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
+        ssoflex=True, # True: out fp32 in SSOflex; else, SSOflex is the same as SSCore
+        # ==============================
         SelectiveScan=None,
-        scan_mode_type='default'
+        CrossScan=CrossScan,
+        CrossMerge=CrossMerge,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -325,6 +230,26 @@ def cross_selective_scan(
     D, N = A_logs.shape
     K, D, R = dt_projs_weight.shape
     L = H * W
+
+    if nrows == 0:
+        if D % 4 == 0:
+            nrows = 4
+        elif D % 3 == 0:
+            nrows = 3
+        elif D % 2 == 0:
+            nrows = 2
+        else:
+            nrows = 1
+        
+    if backnrows == 0:
+        if D % 4 == 0:
+            backnrows = 4
+        elif D % 3 == 0:
+            backnrows = 3
+        elif D % 2 == 0:
+            backnrows = 2
+        else:
+            backnrows = 1
 
     def selective_scan(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
         return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
