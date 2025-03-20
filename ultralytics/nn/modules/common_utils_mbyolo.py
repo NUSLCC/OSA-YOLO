@@ -54,6 +54,7 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
 class CrossScan(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor):
+        # out (B 4 D L)
         B, C, H, W = x.shape
         ctx.shape = (B, C, H, W)
         xs = x.new_empty((B, 4, C, H * W))
@@ -77,9 +78,9 @@ class CrossMerge(torch.autograd.Function):
     def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-        ys = ys.view(B, K, D, -1)
+        ys = ys.view(B, K, D, -1)  # (B K D L)
         ys = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-        y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
+        y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)  # B D L
         return y
 
     @staticmethod
@@ -93,7 +94,7 @@ class CrossMerge(torch.autograd.Function):
         xs[:, 1] = x.view(B, C, H, W).transpose(dim0=2, dim1=3).flatten(2, 3)
         xs[:, 2:4] = torch.flip(xs[:, 0:2], dims=[-1])
         xs = xs.view(B, 4, C, H, W)
-        return xs, None, None
+        return xs
 
 
 # =============
@@ -283,6 +284,23 @@ class SelectiveScanCore(torch.autograd.Function):
     @staticmethod
     @torch.cuda.amp.custom_fwd
     def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1, oflex=True):
+        # all in float
+        if u.stride(-1) != 1:
+            u = u.contiguous()
+        if delta.stride(-1) != 1:
+            delta = delta.contiguous()
+        if D is not None and D.stride(-1) != 1:
+            D = D.contiguous()
+        if B.stride(-1) != 1:
+            B = B.contiguous()
+        if C.stride(-1) != 1:
+            C = C.contiguous()
+        if B.dim() == 3:
+            B = B.unsqueeze(dim=1)
+            ctx.squeeze_B = True
+        if C.dim() == 3:
+            C = C.unsqueeze(dim=1)
+            ctx.squeeze_C = True
         ctx.delta_softplus = delta_softplus
         out, x, *rest = selective_scan_cuda_core.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1)
         ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
@@ -300,6 +318,28 @@ class SelectiveScanCore(torch.autograd.Function):
         return (du, ddelta, dA, dB, dC, dD, ddelta_bias, None, None, None, None)
 
 
+class SelectiveScanOflex(torch.autograd.Function):
+    # comment all checks if inside cross_selective_scan
+    @staticmethod
+    @torch.cuda.amp.custom_fwd
+    def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1, oflex=True):
+        ctx.delta_softplus = delta_softplus
+        out, x, *rest = selective_scan_cuda_oflex.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1, oflex)
+        ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
+        return out
+    
+    @staticmethod
+    @torch.cuda.amp.custom_bwd
+    def backward(ctx, dout, *args):
+        u, delta, A, B, C, D, delta_bias, x = ctx.saved_tensors
+        if dout.stride(-1) != 1:
+            dout = dout.contiguous()
+        du, ddelta, dA, dB, dC, dD, ddelta_bias, *rest = selective_scan_cuda_oflex.bwd(
+            u, delta, A, B, C, D, delta_bias, dout, x, ctx.delta_softplus, 1
+        )
+        return (du, ddelta, dA, dB, dC, dD, ddelta_bias, None, None, None, None)
+
+
 def cross_selective_scan(
         x: torch.Tensor = None,
         x_proj_weight: torch.Tensor = None,
@@ -308,16 +348,20 @@ def cross_selective_scan(
         dt_projs_bias: torch.Tensor = None,
         A_logs: torch.Tensor = None,
         Ds: torch.Tensor = None,
+        delta_softplus = True,
         out_norm: torch.nn.Module = None,
         out_norm_shape="v0",
-        nrows=-1,  # for SelectiveScanNRow
-        backnrows=-1,  # for SelectiveScanNRow
-        delta_softplus=True,
+        # ==============================
         to_dtype=True,
         force_fp32=False,  # False if ssoflex
-        ssoflex=True,
+        # ==============================
+        nrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
+        backnrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
+        ssoflex=True, # True: out fp32 in SSOflex; else, SSOflex is the same as SSCore
+        # ==============================
         SelectiveScan=None,
-        scan_mode_type='default'
+        CrossScan=CrossScan,
+        CrossMerge=CrossMerge,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -325,6 +369,26 @@ def cross_selective_scan(
     D, N = A_logs.shape
     K, D, R = dt_projs_weight.shape
     L = H * W
+
+    if nrows == 0:
+        if D % 4 == 0:
+            nrows = 4
+        elif D % 3 == 0:
+            nrows = 3
+        elif D % 2 == 0:
+            nrows = 2
+        else:
+            nrows = 1
+        
+    if backnrows == 0:
+        if D % 4 == 0:
+            backnrows = 4
+        elif D % 3 == 0:
+            backnrows = 3
+        elif D % 2 == 0:
+            backnrows = 2
+        else:
+            backnrows = 1
 
     def selective_scan(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
         return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
