@@ -15,7 +15,7 @@ def parse_opt():
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')
     parser.add_argument('--amp', action='store_true', help='open amp')
     parser.add_argument('--project', default='/home/lcc/UAVGIT/Mamba-YOLO-11/output_dir/mamba_yolo_omni', help='save to project/name')
-    parser.add_argument('--name', default='mambayolo12_omni_2442_core_switch', help='save to project/name')
+    parser.add_argument('--name', default='mambayolo12_omni_2244_allvim', help='save to project/name')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     opt = parser.parse_args()

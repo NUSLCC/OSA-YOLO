@@ -1,6 +1,6 @@
 from .common_utils_mbyolo import *
 from .conv import CBAM
-__all__ = ("VSSBlock", "SimpleStem", "VisionClueMerge", "XSSBlock", "VSSBlockOmni")
+__all__ = ("VSSBlock", "SimpleStem", "VisionClueMerge", "XSSBlock", "VSSBlockOmni", "XSSBlockOmni")
 
 
 class SS2D(nn.Module):
@@ -537,7 +537,7 @@ class OSSM(nn.Module):
         dt_init_floor=1e-4,
         initialize="v0",
         # ======================
-        forward_type="v3",
+        forward_type="v2",
         # ======================
         **kwargs,
     ):
@@ -579,8 +579,8 @@ class OSSM(nn.Module):
         FORWARD_TYPES = dict(
             # v0=self.forward_corev0,
             # v2=partial(self.forward_corev2, force_fp32=(not self.disable_force32), SelectiveScan=SelectiveScanCore),
-            # v2=partial(self.forward_corev2, force_fp32=None, SelectiveScan=SelectiveScanCore),
-            v3=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex),
+            v2=partial(self.forward_corev2, force_fp32=None, SelectiveScan=SelectiveScanCore),
+            # v3=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex),
             # v31d=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex, cross_selective_scan=partial(cross_selective_scan, CrossScan=CrossScan_Ab_1direction, CrossMerge=CrossMerge_Ab_1direction,)),
             # v32d=partial(self.forward_corev2, force_fp32=False, SelectiveScan=SelectiveScanOflex, cross_selective_scan=partial(cross_selective_scan, CrossScan=CrossScan_Ab_2direction, CrossMerge=CrossMerge_Ab_2direction,)),
             # ===============================
@@ -606,8 +606,8 @@ class OSSM(nn.Module):
         
         self.forward_core = FORWARD_TYPES.get(forward_type, None)
         # ZSJ k_group 指的是扫描的方向
-        k_group = 4 if forward_type not in ["debugscan_sharessm"] else 1
-        # k_group = 8 if forward_type not in ["debugscan_sharessm"] else 1
+        # k_group = 4 if forward_type not in ["debugscan_sharessm"] else 1
+        k_group = 8 if forward_type not in ["debugscan_sharessm"] else 1
 
         # in proj =======================================
         d_proj = d_inner if self.disable_z else (d_inner * 2)
@@ -919,3 +919,73 @@ class VSSBlockOmni(nn.Module):
     #         return checkpoint.checkpoint(self._forward, input)
     #     else:
     #         return self._forward(input)
+    
+    
+class XSSBlockOmni(nn.Module):
+    def __init__(
+            self,
+            in_channels: int = 0,
+            hidden_dim: int = 0,
+            n: int = 1,
+            mlp_ratio=4.0,
+            drop_path: float = 0,
+            norm_layer: Callable[..., torch.nn.Module] = partial(LayerNorm2d, eps=1e-6),
+            # =============================
+            ssm_d_state: int = 16,
+            ssm_ratio=2.0,
+            ssm_dt_rank: Any = "auto",
+            ssm_conv: int = 3,
+            ssm_conv_bias=True,
+            ssm_drop_rate: float = 0,
+            ssm_init="v0",
+            forward_type="v2",
+            # =============================
+            mlp_act_layer=nn.GELU,
+            mlp_drop_rate: float = 0.0,
+            # =============================
+            use_checkpoint: bool = False,
+            post_norm: bool = False,
+            **kwargs,
+    ):
+        super().__init__()
+
+        self.post_norm = post_norm
+
+        self.in_proj = nn.Sequential(
+            nn.Conv2d(in_channels, hidden_dim, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(hidden_dim),
+            nn.SiLU()
+        ) if in_channels != hidden_dim else nn.Identity()
+        self.hidden_dim = hidden_dim
+        
+        # ==========SSM============================
+        self.norm = norm_layer(hidden_dim)
+        self.ss2d = nn.Sequential(*(OSSM(d_model=self.hidden_dim,
+                                         d_state=ssm_d_state,
+                                         ssm_ratio=ssm_ratio,
+                                         dt_rank=ssm_dt_rank,
+                                         d_conv=ssm_conv,
+                                         conv_bias=ssm_conv_bias,
+                                         dropout=ssm_drop_rate, ) for _ in range(n)))
+        self.drop_path = DropPath(drop_path)
+        self.lsblock = LSBlock(hidden_dim, hidden_dim)
+        self.mlp_branch = mlp_ratio > 0
+        if self.mlp_branch:
+            self.norm2 = norm_layer(hidden_dim)
+            mlp_hidden_dim = int(hidden_dim * mlp_ratio)
+            self.mlp = RGBlock(in_features=hidden_dim, hidden_features=mlp_hidden_dim, act_layer=mlp_act_layer,
+                               drop=mlp_drop_rate)
+
+    def forward(self, input):
+        input = self.in_proj(input)
+        X1 = self.lsblock(input)
+        if self.post_norm:
+            x = input + self.drop_path(self.norm(self.ss2d(X1)))
+        else:
+            x = input + self.drop_path(self.ss2d(self.norm(X1)))
+        if self.mlp_branch:
+            if self.post_norm:
+                x = x + self.drop_path(self.norm2(self.mlp(x))) # FFN
+            else:
+                x = x + self.drop_path(self.mlp(self.norm2(x))) # FFN
+        return x
