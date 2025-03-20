@@ -10,9 +10,7 @@ class SS2D(nn.Module):
             d_model=96,
             d_state=16,
             ssm_ratio=2.0,
-            ssm_rank_ratio=2.0,
             dt_rank="auto",
-            act_layer=nn.SiLU,
             # dwconv ===============
             d_conv=3,  # < 2 means no conv
             conv_bias=True,
@@ -30,18 +28,11 @@ class SS2D(nn.Module):
             forward_type="v2",
             **kwargs,
     ):
-        """
-        ssm_rank_ratio would be used in the future...
-        """
         factory_kwargs = {"device": None, "dtype": None}
         super().__init__()
-        d_expand = int(ssm_ratio * d_model)
-        # d_inner = int(min(ssm_rank_ratio, ssm_ratio) * d_model) if ssm_rank_ratio > 0 else d_expand
         d_inner=int(ssm_ratio * d_model)
-        self.dt_rank = math.ceil(d_model / 16) if dt_rank == "auto" else dt_rank
-        self.d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state  # 20240109
+        dt_rank = math.ceil(d_model / 16) if dt_rank == "auto" else dt_rank
         self.d_conv = d_conv
-        self.k_group = 4
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -54,19 +45,34 @@ class SS2D(nn.Module):
         self.disable_z, forward_type = checkpostfix("noz", forward_type)
         self.disable_z_act, forward_type = checkpostfix("nozact", forward_type)
 
-        self.out_norm = nn.LayerNorm(d_inner)
+        # softmax | sigmoid | dwconv | norm ===========================
+        if forward_type[-len("none"):] == "none":
+            forward_type = forward_type[:-len("none")]
+            self.out_norm = nn.Identity()
+        elif forward_type[-len("dwconv3"):] == "dwconv3":
+            forward_type = forward_type[:-len("dwconv3")]
+            self.out_norm = nn.Conv2d(d_inner, d_inner, kernel_size=3, padding=1, groups=d_inner, bias=False)
+            self.out_norm_shape = "v1"
+        elif forward_type[-len("softmax"):] == "softmax":
+            forward_type = forward_type[:-len("softmax")]
+            self.out_norm = nn.Softmax(dim=1)
+        elif forward_type[-len("sigmoid"):] == "sigmoid":
+            forward_type = forward_type[:-len("sigmoid")]
+            self.out_norm = nn.Sigmoid()
+        else:
+            self.out_norm = nn.LayerNorm(d_inner)
 
         # forward_type debug =======================================
         FORWARD_TYPES = dict(
             v2=partial(self.forward_corev2, force_fp32=None, SelectiveScan=SelectiveScanCore),
         )
-        self.forward_core = FORWARD_TYPES.get(forward_type, FORWARD_TYPES.get("v2", None))
-
+        self.forward_core = FORWARD_TYPES.get(forward_type, None)
+        k_group = 4 if forward_type not in ["debugscan_sharessm"] else 1
+        
         # in proj =======================================
         d_proj = d_inner if self.disable_z else (d_inner * 2)
-        self.in_proj = nn.Linear(d_model, d_proj, bias=bias, 	**factory_kwargs)
-        # self.in_proj = nn.Conv2d(d_model, d_proj, kernel_size=1, stride=1, groups=1, bias=bias, **factory_kwargs)
-        self.act: nn.Module = act_layer()
+        self.in_proj = nn.Conv2d(d_model, d_proj, kernel_size=1, stride=1, groups=1, bias=bias, **factory_kwargs)
+        self.act: nn.Module = nn.GELU()
 
         # conv =======================================
         if self.d_conv > 1:
@@ -80,47 +86,31 @@ class SS2D(nn.Module):
                 **factory_kwargs,
             )
 
-        # rank ratio =====================================
-        # self.ssm_low_rank = False
-        # if d_inner < d_expand:
-        #     self.ssm_low_rank = True
-        #     self.in_rank = nn.Conv2d(d_expand, d_inner, kernel_size=1, bias=False, **factory_kwargs)
-        #     self.out_rank = nn.Linear(d_inner, d_expand, bias=False, **factory_kwargs)
-
         # x proj ============================
         self.x_proj = [
-            nn.Linear(d_inner, (self.dt_rank + self.d_state * 2), bias=False, **factory_kwargs)
-            for _ in range(self.k_group)
+            nn.Linear(d_inner, (dt_rank + d_state * 2), bias=False, **factory_kwargs)
+            for _ in range(k_group)
         ]
         self.x_proj_weight = nn.Parameter(torch.stack([t.weight for t in self.x_proj], dim=0))  # (K, N, inner)
         del self.x_proj
 
         # out proj =======================================
-        self.out_proj = nn.Linear(d_inner, d_model, bias=bias, **factory_kwargs)
-        # self.out_proj = nn.Conv2d(d_expand, d_model, kernel_size=1, stride=1, bias=bias, **factory_kwargs)
+        self.out_proj = nn.Conv2d(d_inner, d_model, kernel_size=1, stride=1, bias=bias, **factory_kwargs)
         self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
 
-        # # simple init dt_projs, A_logs, Ds
-        # self.dt_projs_weight = nn.Parameter(torch.randn((self.k_group, d_inner, self.dt_rank)))
-        # self.dt_projs_bias = nn.Parameter(torch.randn((self.k_group, d_inner)))
-        
-        # # A, D =======================================
-        # self.A_logs = nn.Parameter(torch.zeros((self.k_group * d_inner, self.d_state)))  # A == -A_logs.exp() < 0; # 0 < exp(A * dt) < 1
-        # self.Ds = nn.Parameter(torch.ones((self.k_group * d_inner)))
         if initialize in ["v0"]:
             # dt proj ============================
             self.dt_projs = [
                 self.dt_init(dt_rank, d_inner, dt_scale, dt_init, dt_min, dt_max, dt_init_floor, **factory_kwargs)
-                for _ in range(self.k_group)
+                for _ in range(k_group)
             ]
             self.dt_projs_weight = nn.Parameter(torch.stack([t.weight for t in self.dt_projs], dim=0)) # (K, inner, rank)
             self.dt_projs_bias = nn.Parameter(torch.stack([t.bias for t in self.dt_projs], dim=0)) # (K, inner)
             del self.dt_projs
             
             # A, D =======================================
-            self.A_logs = self.A_log_init(d_state, d_inner, copies=self.k_group, merge=True) # (K * D, N)
-            self.Ds = self.D_init(d_inner, copies=self.k_group, merge=True) # (K * D)
-
+            self.A_logs = self.A_log_init(d_state, d_inner, copies=k_group, merge=True) # (K * D, N)
+            self.Ds = self.D_init(d_inner, copies=k_group, merge=True) # (K * D)
 
     @staticmethod
     def dt_init(dt_rank, d_inner, dt_scale=1.0, dt_init="random", dt_min=0.001, dt_max=0.1, dt_init_floor=1e-4, **factory_kwargs):
@@ -223,24 +213,6 @@ class SS2D(nn.Module):
 
         return (y.to(x.dtype) if to_dtype else y)
 
-    # def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan, force_fp32=None):
-    #     force_fp32 = (self.training and (not self.disable_force32)) if force_fp32 is None else force_fp32
-    #     if not channel_first:
-    #         x = x.permute(0, 3, 1, 2).contiguous()
-    #     if self.ssm_low_rank:
-    #         x = self.in_rank(x)
-    #     x = cross_selective_scan(
-    #         x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
-    #         self.A_logs, self.Ds,
-    #         out_norm=getattr(self, "out_norm", None),
-    #         out_norm_shape=getattr(self, "out_norm_shape", "v0"),
-    #         delta_softplus=True, force_fp32=force_fp32,
-    #         SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
-    #     )
-    #     if self.ssm_low_rank:
-    #         x = self.out_rank(x)
-    #     return x
-
     def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanOflex, cross_selective_scan=cross_selective_scan, force_fp32=None):
         if not channel_first:
             x = x.permute(0, 3, 1, 2).contiguous()
@@ -254,17 +226,17 @@ class SS2D(nn.Module):
         )
         return x
 
-
     def forward(self, x: torch.Tensor, **kwargs):
+        with_dconv = (self.d_conv > 1)
         x = self.in_proj(x)
         if not self.disable_z:
-            x, z = x.chunk(2, dim=1)  # (b, d, h, w)
+            x, z = x.chunk(2, dim=1)
             if not self.disable_z_act:
-                z = self.act(z)
-        if self.d_conv > 0:
-            x = self.conv2d(x)  # (b, d, h, w)
+                z =self.act(z)
+        if with_dconv:
+            x = self.conv2d(x) 
         x = self.act(x)
-        y = self.forward_core(x, channel_first=(self.d_conv > 1)) # Main SSM computation
+        y = self.forward_core(x, channel_first=with_dconv)
         y = y.permute(0, 3, 1, 2).contiguous()
         if not self.disable_z:
             y = y * z
@@ -327,9 +299,7 @@ class XSSBlock(nn.Module):
             # =============================
             ssm_d_state: int = 16,
             ssm_ratio=2.0,
-            ssm_rank_ratio=2.0,
             ssm_dt_rank: Any = "auto",
-            ssm_act_layer=nn.SiLU,
             ssm_conv: int = 3,
             ssm_conv_bias=True,
             ssm_drop_rate: float = 0,
@@ -345,20 +315,21 @@ class XSSBlock(nn.Module):
     ):
         super().__init__()
 
+        self.post_norm = post_norm
+
         self.in_proj = nn.Sequential(
             nn.Conv2d(in_channels, hidden_dim, kernel_size=1, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(hidden_dim),
             nn.SiLU()
         ) if in_channels != hidden_dim else nn.Identity()
         self.hidden_dim = hidden_dim
+        
         # ==========SSM============================
         self.norm = norm_layer(hidden_dim)
         self.ss2d = nn.Sequential(*(SS2D(d_model=self.hidden_dim,
                                          d_state=ssm_d_state,
                                          ssm_ratio=ssm_ratio,
-                                         ssm_rank_ratio=ssm_rank_ratio,
                                          dt_rank=ssm_dt_rank,
-                                         act_layer=ssm_act_layer,
                                          d_conv=ssm_conv,
                                          conv_bias=ssm_conv_bias,
                                          dropout=ssm_drop_rate, ) for _ in range(n)))
@@ -368,18 +339,22 @@ class XSSBlock(nn.Module):
         if self.mlp_branch:
             self.norm2 = norm_layer(hidden_dim)
             mlp_hidden_dim = int(hidden_dim * mlp_ratio)
-            self.mlp = RCBAMBlock(in_features=hidden_dim, hidden_features=mlp_hidden_dim, act_layer=mlp_act_layer,
+            self.mlp = RGBlock(in_features=hidden_dim, hidden_features=mlp_hidden_dim, act_layer=mlp_act_layer,
                                drop=mlp_drop_rate)
 
     def forward(self, input):
         input = self.in_proj(input)
-        # ====================
         X1 = self.lsblock(input)
-        input = input + self.drop_path(self.ss2d(self.norm(X1)))
-        # ===================
+        if self.post_norm:
+            x = input + self.drop_path(self.norm(self.ss2d(X1)))
+        else:
+            x = input + self.drop_path(self.ss2d(self.norm(X1)))
         if self.mlp_branch:
-            input = input + self.drop_path(self.mlp(self.norm2(input)))
-        return input
+            if self.post_norm:
+                x = x + self.drop_path(self.norm2(self.mlp(x))) # FFN
+            else:
+                x = x + self.drop_path(self.mlp(self.norm2(x))) # FFN
+        return x
 
 
 class VSSBlock(nn.Module):
@@ -392,7 +367,6 @@ class VSSBlock(nn.Module):
             # =============================
             ssm_d_state: int = 16,
             ssm_ratio=2.0,
-            ssm_rank_ratio=2.0,
             ssm_dt_rank: Any = "auto",
             ssm_act_layer=nn.SiLU,
             ssm_conv: int = 3,
@@ -428,7 +402,6 @@ class VSSBlock(nn.Module):
                 d_model=hidden_dim,
                 d_state=ssm_d_state,
                 ssm_ratio=ssm_ratio,
-                ssm_rank_ratio=ssm_rank_ratio,
                 dt_rank=ssm_dt_rank,
                 act_layer=ssm_act_layer,
                 # ==========================
@@ -453,14 +426,20 @@ class VSSBlock(nn.Module):
         if self.mlp_branch:
             self.norm2 = norm_layer(hidden_dim)
             mlp_hidden_dim = int(hidden_dim * mlp_ratio)
-            self.mlp = RCBAMBlock(in_features=hidden_dim, hidden_features=mlp_hidden_dim, act_layer=mlp_act_layer, drop=mlp_drop_rate, channels_first=False)
+            self.mlp = RGBlock(in_features=hidden_dim, hidden_features=mlp_hidden_dim, act_layer=mlp_act_layer, drop=mlp_drop_rate, channels_first=False)
 
     def forward(self, input: torch.Tensor):
         input = self.proj_conv(input)
         X1 = self.lsblock(input)
-        x = input + self.drop_path(self.op(self.norm(X1)))
+        if self.post_norm:
+            x = input + self.drop_path(self.norm(self.op(X1)))
+        else:
+            x = input + self.drop_path(self.op(self.norm(X1)))
         if self.mlp_branch:
-            x = x + self.drop_path(self.mlp(self.norm2(x)))  # FFN
+            if self.post_norm:
+                x = x + self.drop_path(self.norm2(self.mlp(x))) # FFN
+            else:
+                x = x + self.drop_path(self.mlp(self.norm2(x))) # FFN
         return x
 
 
@@ -627,15 +606,15 @@ class OSSM(nn.Module):
         
         self.forward_core = FORWARD_TYPES.get(forward_type, None)
         # ZSJ k_group 指的是扫描的方向
-        # k_group = 4 if forward_type not in ["debugscan_sharessm"] else 1
-        k_group = 8 if forward_type not in ["debugscan_sharessm"] else 1
+        k_group = 4 if forward_type not in ["debugscan_sharessm"] else 1
+        # k_group = 8 if forward_type not in ["debugscan_sharessm"] else 1
 
         # in proj =======================================
         d_proj = d_inner if self.disable_z else (d_inner * 2)
         # self.in_proj = nn.Linear(d_model, d_proj, bias=bias, **factory_kwargs)
         self.in_proj = nn.Conv2d(d_model, d_proj, kernel_size=1, stride=1, groups=1, bias=bias, **factory_kwargs)
         # self.act: nn.Module = act_layer()
-        self.act: nn.Module = nn.SiLU()
+        self.act: nn.Module = nn.GELU()
         # conv =======================================
         if d_conv > 1:
             self.conv2d = nn.Conv2d(
