@@ -481,38 +481,38 @@ class VisionClueMerge(nn.Module):
         return self.pw_linear(y)
 
 
-class RCBAMBlock(nn.Module):
-    """
-    An RG Block that first applies a bottleneck transformation with a residual connection,
-    then refines the output with CBAM.
-    """
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0., channels_first=False):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        hidden_features = in_features * 2
-        self.conv1 = nn.Conv2d(in_features, hidden_features, kernel_size=1)
-        self.dwconv = nn.Conv2d(hidden_features, hidden_features, kernel_size=3, stride=1, padding=1, bias=True, 
-                                groups=hidden_features)
-        self.bn = nn.BatchNorm2d(hidden_features)
-        self.act = act_layer()
-        self.conv2 = nn.Conv2d(hidden_features, in_features, kernel_size=1)
-        self.drop = nn.Dropout(drop) if drop > 0 else nn.Identity()
-        self.cbam = CBAM(in_features)
-        self.conv3 = nn.Conv2d(in_features, out_features, kernel_size=1)
+# class RCBAMBlock(nn.Module):
+#     """
+#     An RG Block that first applies a bottleneck transformation with a residual connection,
+#     then refines the output with CBAM.
+#     """
+#     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0., channels_first=False):
+#         super().__init__()
+#         out_features = out_features or in_features
+#         hidden_features = hidden_features or in_features
+#         hidden_features = in_features * 2
+#         self.conv1 = nn.Conv2d(in_features, hidden_features, kernel_size=1)
+#         self.dwconv = nn.Conv2d(hidden_features, hidden_features, kernel_size=3, stride=1, padding=1, bias=True, 
+#                                 groups=hidden_features)
+#         self.bn = nn.BatchNorm2d(hidden_features)
+#         self.act = act_layer()
+#         self.conv2 = nn.Conv2d(hidden_features, in_features, kernel_size=1)
+#         self.drop = nn.Dropout(drop) if drop > 0 else nn.Identity()
+#         self.cbam = CBAM(in_features)
+#         self.conv3 = nn.Conv2d(in_features, out_features, kernel_size=1)
     
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.dwconv(out)
-        out = self.bn(out)
-        out = self.act(out)
-        out = self.conv2(out)
-        out = self.drop(out)
-        out = out + x
-        out = self.cbam(out)
-        out = self.conv3(out)
-        return out
-    
+#     def forward(self, x):
+#         out = self.conv1(x)
+#         out = self.dwconv(out)
+#         out = self.bn(out)
+#         out = self.act(out)
+#         out = self.conv2(out)
+#         out = self.drop(out)
+#         out = out + x
+#         out = self.cbam(out)
+#         out = self.conv3(out)
+#         return out
+
 
 class OSSM(nn.Module):
     def __init__(
