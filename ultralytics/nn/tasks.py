@@ -53,6 +53,7 @@ from ultralytics.nn.modules import (
     VSSBlock,
     VSSBlockOmni,
     XSSBlock,
+    XSSBlockOmni,
     PSA,
     C2PSA,
     C2fPSA,
@@ -906,7 +907,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             C3x,
             RepC3,
             PSA, C2PSA, C2fPSA,
-            SimpleStem, VisionClueMerge, VSSBlock, VSSBlockOmni, XSSBlock,
+            SimpleStem, VisionClueMerge, VSSBlock, VSSBlockOmni, XSSBlock, XSSBlockOmni,
             C3k2,
             A2C2f,
             HybridMambaAA,
@@ -921,7 +922,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 )  # num heads
 
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, XSSBlock, VSSBlockOmni, C2PSA, C2fPSA, A2C2f, C3k2, HybridMambaAA}:
+            if m in {BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, XSSBlock, XSSBlockOmni, C3k2, A2C2f}:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is AIFI:

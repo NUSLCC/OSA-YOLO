@@ -15,7 +15,7 @@ class ECA(nn.Module):
         channel (int): Number of input channels.
         k_size (int): Kernel size for the 1D convolution. Default: 3.
     """
-    def __init__(self, channel, k_size=3):
+    def __init__(self, k_size=3):
         super().__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         # 1D convolution with padding to maintain the channel dimension
@@ -49,16 +49,19 @@ class RGBlockECA(nn.Module):
         drop (float): Dropout rate applied after the projection. Default is 0.
         k_size (int): Kernel size for the ECA module. Default is 3.
     """
-    def __init__(self, in_features, expansion=2, drop=0.0, k_size=3):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0., channels_first=False):
         super().__init__()
-        hidden_features = in_features * expansion
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        hidden_features = in_features * 2
         self.conv1 = nn.Conv2d(in_features, hidden_features, kernel_size=1)
-        self.dwconv = nn.Conv2d(hidden_features, hidden_features, kernel_size=3, padding=1, groups=hidden_features)
+        self.dwconv = nn.Conv2d(hidden_features, hidden_features, kernel_size=3, stride=1, padding=1, bias=True, 
+                                groups=hidden_features)
         self.bn = nn.BatchNorm2d(hidden_features)
-        self.act = nn.ReLU(inplace=True)
+        self.act = act_layer()
         self.conv2 = nn.Conv2d(hidden_features, in_features, kernel_size=1)
         self.drop = nn.Dropout(drop) if drop > 0 else nn.Identity()
-        self.eca = ECA(in_features, k_size=k_size)
+        self.eca = ECA(k_size=3)
     
     def forward(self, x):
         residual = x
@@ -110,10 +113,10 @@ class RCBAMBlock(nn.Module):
 if __name__ == "__main__":
     dummy_input = torch.randn(1, 64, 32, 32)  # [B, C, H, W]
 
-    block_eca = RGBlockECA(in_features=64, expansion=2, drop=0.1, k_size=3)
+    block_eca = RGBlockECA(in_features=64, out_features=32, drop=0.1)
     output = block_eca(dummy_input)
     print("Output ECA shape:", output.shape)
 
-    block_cbam = RCBAMBlock(in_features=64, out_features=32, drop=0.1)    
-    output = block_cbam(dummy_input)
-    print("Output CBAM shape:", output.shape)    
+    # block_cbam = RCBAMBlock(in_features=64, out_features=32, drop=0.1)    
+    # output = block_cbam(dummy_input)
+    # print("Output CBAM shape:", output.shape)    
