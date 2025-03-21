@@ -84,7 +84,7 @@ from .transformer import (
     TransformerLayer,
 )
 
-from .mamba_yolo import SimpleStem, VisionClueMerge, VSSBlock, XSSBlock, VSSBlockOmni
+from .mamba_yolo import SimpleStem, VisionClueMerge, VSSBlock, XSSBlock, VSSBlockOmni, XSSBlockOmni
 
 __all__ = (
     "Conv",
@@ -146,7 +146,7 @@ __all__ = (
     "CBLinear",
     "Silence",
     "Attention", "PSA", "C2PSA", "C2fPSA",
-    "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock", "VSSBlockOmni",
+    "SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock", "VSSBlockOmni", "XSSBlockOmni"
     "C3k2",
     "A2C2f",
     "HybridMambaAA",

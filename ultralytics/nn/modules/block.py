@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
-from .mamba_yolo import VSSBlock, VSSBlockOmni
+from .mamba_yolo import VSSBlock
 
 __all__ = (
     "DFL",
@@ -1100,8 +1100,8 @@ class A2C2f(nn.Module):
             shortcut (bool): Whether to use shortcut connections in C3k blocks.
         """
         super().__init__()
-        # print("AAc1:", c1)
-        # print("AAc2:", c2)
+        # # print("AAc1:", c1)
+        # # print("AAc2:", c2)
         c_ = int(c2 * e)  # hidden channels
         assert c_ % 32 == 0, "Dimension of ABlock be a multiple of 32."
 
@@ -1153,21 +1153,27 @@ class HybridMambaAA(nn.Module):
         #     "g": 1,
         #     "shortcut": True
         # }
+        # print("Hc1:", c1)
+        # print("Hc2:", c2)
+        
+        assert c1 % 2 == 0
+        self.c_ = c1 // 2
         # Branch 1: VSSBlock branch (global context)
         # print("Hc1:", c1)
         # print("Hc2:", c2)
         self.vss_branch = VSSBlock(c1, c2)
         
         # Branch 2: A2C2f branch (area-attention + residual feature aggregation)
-        self.a2c2f_branch = A2C2f(c1, c2, n, a2, area, residual, mlp_ratio, e, g, shortcut)
+        self.a2c2f_branch = A2C2f(self.c_, self.c_, n, a2, area, residual, mlp_ratio, e, g, shortcut)
         
         # Fusion layer: fuse concatenated features (2*out_channels -> out_channels)
-        self.fuse_conv = Conv(2 * c2, c2, k=1, s=1)
+        self.fuse_conv = Conv(2 * self.c_, c2, k=1, s=1)
         
     def forward(self, x):
+        x1, x2 = torch.split(x, self.c_, dim=1)
         # Compute outputs from each branch
-        feat_vss = self.vss_branch(x)
-        feat_a2c2f = self.a2c2f_branch(x)
+        feat_vss = self.vss_branch(x1)
+        feat_a2c2f = self.a2c2f_branch(x2)
         # Fuse along channel dimension
         fused = torch.cat([feat_vss, feat_a2c2f], dim=1)
         fused = self.fuse_conv(fused)
