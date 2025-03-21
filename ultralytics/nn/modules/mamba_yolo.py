@@ -1,6 +1,6 @@
 from .common_utils_mbyolo import *
 from .conv import CBAM
-__all__ = ("VSSBlock", "SimpleStem", "VisionClueMerge", "XSSBlock", "VSSBlockOmni", "XSSBlockOmni")
+__all__ = ("SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock", "VSSBlockOmni", "XSSBlockOmni")
 
 
 class SS2D(nn.Module):
