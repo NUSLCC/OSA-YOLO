@@ -103,7 +103,7 @@ class CrossScanZigzag(torch.autograd.Function):
     def forward(ctx, x: torch.Tensor):
         B, C, H, W = x.shape
         ctx.shape = (B, C, H, W)
-        zigzag_indices_list = zigzag_path(H, device=x.device)
+        zigzag_indices_list = zigzag_path(H, W, device=x.device)  # Pass H and W
         xs = x.new_empty((B, len(zigzag_indices_list), C, H * W))
         x_flat = x.view(B, C, H * W)
         for i, zigzag_indices in enumerate(zigzag_indices_list):
@@ -114,7 +114,7 @@ class CrossScanZigzag(torch.autograd.Function):
     def backward(ctx, ys: torch.Tensor):
         B, C, H, W = ctx.shape
         L = H * W
-        zigzag_indices_list = zigzag_path(H, device=ys.device)
+        zigzag_indices_list = zigzag_path(H, W, device=ys.device)  # Pass H and W
         y = ys.new_zeros((B, C, L))
         for i, zigzag_indices in enumerate(zigzag_indices_list):
             y[:, :, zigzag_indices] += ys[:, i]
@@ -629,3 +629,32 @@ def zigzag_path(N, device='cpu'):
         paths[_index] = torch.tensor(_p, device=device)
     return paths
 
+def zigzag_path_lr(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
+    path = []
+    for i in range(H):
+        for j in range(W):
+            col = j if i % 2 == 0 else W - 1 - j
+            path.append((start_row + dir_row * i) * W + (start_col + dir_col * col))
+    return path
+
+def zigzag_path_tb(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
+    path = []
+    for j in range(W):
+        for i in range(H):
+            row = i if j % 2 == 0 else H - 1 - i
+            path.append((start_row + dir_row * row) * W + (start_col + dir_col * j))
+    return path
+
+def zigzag_path(H, W, device='cpu'):
+    paths = []
+    for start_row, start_col, dir_row, dir_col in [
+        (0, 0, 1, 1),
+        (0, W - 1, 1, -1),
+        (H - 1, 0, -1, 1),
+        (H - 1, W - 1, -1, -1),
+    ]:
+        paths.append(zigzag_path_lr(H, W, start_row, start_col, dir_row, dir_col))
+        paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
+    for _index, _p in enumerate(paths):
+        paths[_index] = torch.tensor(_p, device=device)
+    return paths
