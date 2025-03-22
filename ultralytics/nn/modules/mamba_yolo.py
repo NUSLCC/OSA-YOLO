@@ -693,7 +693,7 @@ class XSSBlock_Vim(nn.Module):
         
         # ==========SSM============================
         self.norm = norm_layer(hidden_dim)
-        self.ss2d = nn.Sequential(*(SS2D(d_model=self.hidden_dim,
+        self.ss2d = nn.Sequential(*(SS2D_Vim(d_model=self.hidden_dim,
                                          d_state=ssm_d_state,
                                          ssm_ratio=ssm_ratio,
                                          dt_rank=ssm_dt_rank,
@@ -735,7 +735,7 @@ class VSSBlock_Vim(nn.Module):
             ssm_d_state: int = 16,
             ssm_ratio=2.0,
             ssm_dt_rank: Any = "auto",
-            ssm_act_layer=nn.SiLU,
+            ssm_act_layer=nn.GELU,
             ssm_conv: int = 3,
             ssm_conv_bias=True,
             ssm_drop_rate: float = 0,
@@ -765,7 +765,7 @@ class VSSBlock_Vim(nn.Module):
 
         if self.ssm_branch:
             self.norm = norm_layer(hidden_dim)
-            self.op = SS2D(
+            self.op = SS2D_Vim(
                 d_model=hidden_dim,
                 d_state=ssm_d_state,
                 ssm_ratio=ssm_ratio,
@@ -848,7 +848,7 @@ class XSSBlock(nn.Module):
         self.hidden_dim = hidden_dim
         # ==========SSM============================
         self.norm = norm_layer(hidden_dim)
-        self.ss2d = nn.Sequential(*(SS2D_Zig(d_model=self.hidden_dim,
+        self.ss2d = nn.Sequential(*(SS2D(d_model=self.hidden_dim,
                                          d_state=ssm_d_state,
                                          ssm_ratio=ssm_ratio,
                                          ssm_rank_ratio=ssm_rank_ratio,
@@ -919,7 +919,7 @@ class VSSBlock(nn.Module):
 
         if self.ssm_branch:
             self.norm = norm_layer(hidden_dim)
-            self.op = SS2D_Zig(
+            self.op = SS2D(
                 d_model=hidden_dim,
                 d_state=ssm_d_state,
                 ssm_ratio=ssm_ratio,
