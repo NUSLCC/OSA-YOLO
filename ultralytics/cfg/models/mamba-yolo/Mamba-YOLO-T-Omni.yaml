@@ -9,11 +9,11 @@ backbone:
   - [-1, 1, SimpleStem, [128, 3]]         # 0-P2/4
   - [-1, 2, VSSBlockOmni, [128]]          # 1
   - [-1, 1, VisionClueMerge, [256]]       # 2 p3/8
-  - [-1, 2, VSSBlockOmni, [256]]          # 3
+  - [-1, 4, VSSBlockOmni, [256]]          # 3
   - [-1, 1, VisionClueMerge, [512]]       # 4 p4/16
   - [-1, 4, VSSBlockOmni, [512]]          # 5
   - [-1, 1, VisionClueMerge, [1024]]      # 6 p5/32
-  - [-1, 4, VSSBlockOmni, [1024]]         # 7
+  - [-1, 2, VSSBlockOmni, [1024]]         # 7
   - [-1, 1, SPPF, [1024, 5]]              # 8
 
 # Mamba-YOLO PAFPN
