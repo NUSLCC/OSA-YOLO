@@ -6,7 +6,7 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='/home/lcc/UAVGIT/Mamba-YOLO-11/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
     parser.add_argument('--config', type=str, default='/home/lcc/UAVGIT/Mamba-YOLO-11/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T.yaml', help='model path(s)')
-    parser.add_argument('--batch_size', type=int, default=16, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=14, help='batch size')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--task', default='train', help='train, val, test, speed or study')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1 or cpu')
