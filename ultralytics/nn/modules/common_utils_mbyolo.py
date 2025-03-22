@@ -153,7 +153,6 @@ class CrossScanOmni(torch.autograd.Function):
     def forward(ctx, x: torch.Tensor):
         B, C, H, W = x.shape
         ctx.shape = (B, C, H, W)
-        # xs = x.new_empty((B, 4, C, H * W))
         xs = x.new_empty((B, 8, C, H * W))
         # 添加横向和竖向的扫描
         xs[:, 0] = x.flatten(2, 3)
@@ -173,13 +172,11 @@ class CrossScanOmni(torch.autograd.Function):
         B, C, H, W = ctx.shape
         L = H * W
         # 把横向和竖向的反向部分再反向回来，并和原来的横向和竖向相加
-        # ys = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, -1, L)
         y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, -1, L)
         # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
         # y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, -1, L)
         y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, -1, L)
         y_rb = y_rb.view(B, -1, H, W)
-
         # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
         y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, -1, L)
         # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
@@ -195,15 +192,12 @@ class CrossMergeOmni(torch.autograd.Function):
     def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-        ys = ys.view(B, K, D, -1)
-        # ys = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-        # y = ys[:, 0] + ys[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
+        ys = ys.view(B, K, D, -1) # (B K D L)
 
         y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
         # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
         y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
         y_rb = y_rb.view(B, -1, H, W)
-
         # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
         y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, D, -1)
         # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
@@ -219,23 +213,17 @@ class CrossMergeOmni(torch.autograd.Function):
         # out: (b, k, d, l)
         H, W = ctx.shape
         B, C, L = x.shape
-        # xs = x.new_empty((B, 4, C, L))
         xs = x.new_empty((B, 8, C, L))
-
         # 横向和竖向扫描
         xs[:, 0] = x
         xs[:, 1] = x.view(B, C, H, W).transpose(dim0=2, dim1=3).flatten(2, 3)
         xs[:, 2:4] = torch.flip(xs[:, 0:2], dims=[-1])
-        # xs = xs.view(B, 4, C, H, W)
-
         # 提供斜向和反斜向的扫描
         xs[:, 4] = diagonal_gather(x.view(B,C,H,W))
         xs[:, 5] = antidiagonal_gather(x.view(B,C,H,W))
         xs[:, 6:8] = torch.flip(xs[:, 4:6], dims=[-1])
-
-        # return xs
         return xs.view(B, 8, C, H, W)
-# =============
+
 
 # cross selective scan ===============================
 class SelectiveScanCore(torch.autograd.Function):
