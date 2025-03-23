@@ -98,7 +98,7 @@ class CrossMerge(torch.autograd.Function):
         return xs
 
 
-class CrossScanZigzag(torch.autograd.Function):
+class CrossScan_Zig(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor):
         B, C, H, W = x.shape
@@ -121,7 +121,7 @@ class CrossScanZigzag(torch.autograd.Function):
         return y.view(B, C, H, W)
     
 
-class CrossMergeZigzag(torch.autograd.Function):
+class CrossMerge_Zig(torch.autograd.Function):
     @staticmethod
     def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
@@ -188,7 +188,7 @@ def antidiagonal_scatter(tensor_flat, original_shape):
     result_tensor.scatter_(3, expanded_index, tensor_reshaped)
     return result_tensor
 
-class CrossScanOmni(torch.autograd.Function):
+class CrossScan_Omni(torch.autograd.Function):
     # ZSJ 这里是把图像按照特定方向展平的地方，改变扫描方向可以在这里修改
     @staticmethod
     def forward(ctx, x: torch.Tensor):
@@ -228,7 +228,7 @@ class CrossScanOmni(torch.autograd.Function):
         return y_res
 
 
-class CrossMergeOmni(torch.autograd.Function):
+class CrossMerge_Omni(torch.autograd.Function):
     @staticmethod
     def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
@@ -439,8 +439,8 @@ def cross_selective_scan_zigzag(
         ssoflex=True, # True: out fp32 in SSOflex; else, SSOflex is the same as SSCore
         # ==============================
         SelectiveScan=None,
-        CrossScan=CrossScanZigzag,
-        CrossMerge=CrossMergeZigzag,
+        CrossScan=CrossScan_Zig,
+        CrossMerge=CrossMerge_Zig,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -529,8 +529,8 @@ def cross_selective_scan_omni(
     ssoflex=True, # True: out fp32 in SSOflex; else, SSOflex is the same as SSCore
     # ==============================
     SelectiveScan=None,
-    CrossScan=CrossScanOmni,
-    CrossMerge=CrossMergeOmni,
+    CrossScan=CrossScan_Omni,
+    CrossMerge=CrossMerge_Omni,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
