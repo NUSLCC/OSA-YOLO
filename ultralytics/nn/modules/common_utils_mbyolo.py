@@ -127,17 +127,53 @@ class CrossMerge_Zig(torch.autograd.Function):
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
         # Use SUM instead of MEAN
-        y = ys.sum(dim=1)  # Changed from mean to sum
+        ys_paired = ys.view(B, 4, 2, D, H, W)
+        # Process pairs: scan + reversed scan
+        merged_pairs = []
+        for pair in ys_paired.unbind(1):
+            merged = pair[:, 0] + pair[:, 1].flip(dims=[-1])  # Reverse second scan
+            merged_pairs.append(merged)
+        
+        y = torch.stack(merged_pairs, dim=1).sum(dim=1)  # [B,C,H,W]
         return y.view(B, D, -1)
 
     @staticmethod
     def backward(ctx, x: torch.Tensor):
         H, W = ctx.shape
         B, C, L = x.shape
-        # Match the actual number of scans (8 in your case)
-        xs = x.new_empty((B, 8, C, L))
-        xs[:] = x.unsqueeze(1) / 8  # Divided by number of scans
+        # Reconstruct spatial gradients
+        grad_y = x.view(B, C, H, W)  # [B,C,H,W]
+        # Expand gradients to 4 pairs
+        grad_pairs = grad_y.unsqueeze(1).expand(-1, 4, -1, -1, -1)  # [B,4,C,H,W]
+        # Distribute to 8 scans (2 per pair)
+        grads = []
+        for i in range(4):
+            # Original scan gradient
+            grads.append(grad_pairs[:, i])
+            # Reverse scan gradient (flip)
+            grads.append(grad_pairs[:, i].flip(dims=[-1]))
+        # Combine and reshape
+        xs = torch.stack(grads, dim=1)  # [B,8,C,H,W]
         return xs.view(B, 8, C, H, W)
+
+
+# class CrossMerge_Zig(torch.autograd.Function):
+#     @staticmethod
+#     def forward(ctx, ys: torch.Tensor):
+#         B, K, D, H, W = ys.shape
+#         ctx.shape = (H, W)
+#         # Use SUM instead of MEAN
+#         y = ys.sum(dim=1)  # Changed from mean to sum
+#         return y.view(B, D, -1)
+
+#     @staticmethod
+#     def backward(ctx, x: torch.Tensor):
+#         H, W = ctx.shape
+#         B, C, L = x.shape
+#         # Match the actual number of scans (8 in your case)
+#         xs = x.new_empty((B, 8, C, L))
+#         xs[:] = x.unsqueeze(1) / 8  # Divided by number of scans
+#         return xs.view(B, 8, C, H, W)
 
 # =============
 def antidiagonal_gather(tensor):
