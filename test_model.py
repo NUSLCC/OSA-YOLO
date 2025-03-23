@@ -27,7 +27,9 @@ if __name__ == '__main__':
     # model5 = XSSBlock_Omni(in_channels=64, hidden_dim=128).cuda()
     # y = model5(x)
     # print(y.shape)
-
+    model = SS2D(d_model=64, d_state=128).cuda()
+    y = model(x)
+    print(y.shape)
     model = SS2D_Zig(d_model=64, d_state=128).cuda()
     y = model(x)
     print(y.shape)

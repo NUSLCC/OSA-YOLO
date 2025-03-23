@@ -103,8 +103,8 @@ class CrossScan_Zig(torch.autograd.Function):
     def forward(ctx, x: torch.Tensor):
         B, C, H, W = x.shape
         ctx.shape = (B, C, H, W)
-        zigzag_indices_list = zigzag_path(H, W, device=x.device)  # Pass H and W
-        xs = x.new_empty((B, len(zigzag_indices_list), C, H * W))
+        zigzag_indices_list = zigzag_path(H, W, device=x.device)
+        xs = x.new_empty((B, len(zigzag_indices_list), C, H * W)) # B 8 C L
         x_flat = x.view(B, C, H * W)
         for i, zigzag_indices in enumerate(zigzag_indices_list):
             xs[:, i] = x_flat[:, :, zigzag_indices]
@@ -126,16 +126,17 @@ class CrossMerge_Zig(torch.autograd.Function):
     def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-        y = ys.mean(dim=1)
+        # Use SUM instead of MEAN
+        y = ys.sum(dim=1)  # Changed from mean to sum
         return y.view(B, D, -1)
 
     @staticmethod
     def backward(ctx, x: torch.Tensor):
         H, W = ctx.shape
         B, C, L = x.shape
+        # Match the actual number of scans (8 in your case)
         xs = x.new_empty((B, 8, C, L))
-        for i in range(8):
-            xs[:, i] = x
+        xs[:] = x.unsqueeze(1) / 8  # Divided by number of scans
         return xs.view(B, 8, C, H, W)
 
 # =============
@@ -598,36 +599,36 @@ def cross_selective_scan_omni(
 
     return (y.to(x.dtype) if to_dtype else y)
 
-def zigzag_path(N, device='cpu'):
-    def zigzag_path_lr(N, start_row=0, start_col=0, dir_row=1, dir_col=1):
-        path = []
-        for i in range(N):
-            for j in range(N):
-                col = j if i % 2 == 0 else N - 1 - j
-                path.append((start_row + dir_row * i) * N + start_col + dir_col * col)
-        return path
+# def zigzag_path(N, device='cpu'):
+#     def zigzag_path_lr(N, start_row=0, start_col=0, dir_row=1, dir_col=1):
+#         path = []
+#         for i in range(N):
+#             for j in range(N):
+#                 col = j if i % 2 == 0 else N - 1 - j
+#                 path.append((start_row + dir_row * i) * N + start_col + dir_col * col)
+#         return path
 
-    def zigzag_path_tb(N, start_row=0, start_col=0, dir_row=1, dir_col=1):
-        path = []
-        for j in range(N):
-            for i in range(N):
-                row = i if j % 2 == 0 else N - 1 - i
-                path.append((start_row + dir_row * row) * N + start_col + dir_col * j)
-        return path
+#     def zigzag_path_tb(N, start_row=0, start_col=0, dir_row=1, dir_col=1):
+#         path = []
+#         for j in range(N):
+#             for i in range(N):
+#                 row = i if j % 2 == 0 else N - 1 - i
+#                 path.append((start_row + dir_row * row) * N + start_col + dir_col * j)
+#         return path
 
-    paths = []
-    for start_row, start_col, dir_row, dir_col in [
-        (0, 0, 1, 1),
-        (0, N - 1, 1, -1),
-        (N - 1, 0, -1, 1),
-        (N - 1, N - 1, -1, -1),
-    ]:
-        paths.append(zigzag_path_lr(N, start_row, start_col, dir_row, dir_col))
-        paths.append(zigzag_path_tb(N, start_row, start_col, dir_row, dir_col))
+#     paths = []
+#     for start_row, start_col, dir_row, dir_col in [
+#         (0, 0, 1, 1),
+#         (0, N - 1, 1, -1),
+#         (N - 1, 0, -1, 1),
+#         (N - 1, N - 1, -1, -1),
+#     ]:
+#         paths.append(zigzag_path_lr(N, start_row, start_col, dir_row, dir_col))
+#         paths.append(zigzag_path_tb(N, start_row, start_col, dir_row, dir_col))
 
-    for _index, _p in enumerate(paths):
-        paths[_index] = torch.tensor(_p, device=device)
-    return paths
+#     for _index, _p in enumerate(paths):
+#         paths[_index] = torch.tensor(_p, device=device)
+#     return paths
 
 def zigzag_path_lr(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
     path = []
