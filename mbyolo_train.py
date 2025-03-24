@@ -11,6 +11,7 @@ def parse_opt():
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1 or cpu')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--workers', type=int, default=16, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--workers', type=int, default=16, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')
     parser.add_argument('--amp', action='store_true', help='open amp')
     parser.add_argument('--project', default='/home/chenchen/UAVGIT/Mamba-YOLO-11/output_dir/mamba_yolo12_ss2d', help='save to project/name')
