@@ -102,7 +102,7 @@ class CrossScan_Zig(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor):
         B, C, H, W = x.shape
-        ctx.shape = (B, C, H, W)
+        ctx.shape = (B, C, int(H), int(W))
         zigzag_indices_list = zigzag_path(H, W, device=x.device)
         xs = x.new_empty((B, len(zigzag_indices_list), C, H * W)) # B 4 C L
         x_flat = x.view(B, C, H * W)
@@ -113,6 +113,8 @@ class CrossScan_Zig(torch.autograd.Function):
     @staticmethod
     def backward(ctx, ys: torch.Tensor):
         B, C, H, W = ctx.shape
+        H = int(H)
+        W = int(W)
         L = H * W
         zigzag_indices_list = zigzag_path(H, W, device=ys.device)  # Pass H and W
         y = ys.new_zeros((B, C, L))
@@ -723,6 +725,8 @@ def zigzag_path_tb(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
     return path
 
 def zigzag_path(H, W, device='cpu'):
+    H = int(H)
+    W = int(W)
     paths = []
     for start_row, start_col, dir_row, dir_col in [
         (0, 0, 1, 1),          # Top-left to bottom-right
@@ -730,8 +734,8 @@ def zigzag_path(H, W, device='cpu'):
         (H - 1, 0, -1, 1),     # Bottom-left to top-right
         (H - 1, W - 1, -1, -1) # Bottom-right to top-left
     ]:
-        paths.append(zigzag_path_lr(H, W, start_row, start_col, dir_row, dir_col))
-        # paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
+        # paths.append(zigzag_path_lr(H, W, start_row, start_col, dir_row, dir_col))
+        paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
     for _index, _p in enumerate(paths):
         paths[_index] = torch.tensor(_p, device=device)
     return paths
