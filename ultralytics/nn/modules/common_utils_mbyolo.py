@@ -734,8 +734,8 @@ def zigzag_path(H, W, device='cpu'):
         (H - 1, 0, -1, 1),     # Bottom-left to top-right
         (H - 1, W - 1, -1, -1) # Bottom-right to top-left
     ]:
-        paths.append(zigzag_path_lr(H, W, start_row, start_col, dir_row, dir_col))
-        # paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
+        # paths.append(zigzag_path_lr(H, W, start_row, start_col, dir_row, dir_col))
+        paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
     for _index, _p in enumerate(paths):
         paths[_index] = torch.tensor(_p, device=device)
     return paths
