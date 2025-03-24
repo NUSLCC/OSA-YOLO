@@ -104,7 +104,7 @@ class CrossScan_Zig(torch.autograd.Function):
         B, C, H, W = x.shape
         ctx.shape = (B, C, int(H), int(W))
         zigzag_indices_list = zigzag_path(H, W, device=x.device)
-        xs = x.new_empty((B, len(zigzag_indices_list), C, H * W)) # B 8 C L
+        xs = x.new_empty((B, len(zigzag_indices_list), C, H * W)) # B 4 C L
         x_flat = x.view(B, C, H * W)
         for i, zigzag_indices in enumerate(zigzag_indices_list):
             xs[:, i] = x_flat[:, :, zigzag_indices]
@@ -306,6 +306,47 @@ class CrossMerge_Omni(torch.autograd.Function):
 
 
 # cross selective scan ===============================
+# class SelectiveScanCore(torch.autograd.Function):
+#     # comment all checks if inside cross_selective_scan
+#     @staticmethod
+#     @torch.cuda.amp.custom_fwd
+#     def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1,
+#                 oflex=True):
+#         # all in float
+#         if u.stride(-1) != 1:
+#             u = u.contiguous()
+#         if delta.stride(-1) != 1:
+#             delta = delta.contiguous()
+#         if D is not None and D.stride(-1) != 1:
+#             D = D.contiguous()
+#         if B.stride(-1) != 1:
+#             B = B.contiguous()
+#         if C.stride(-1) != 1:
+#             C = C.contiguous()
+#         if B.dim() == 3:
+#             B = B.unsqueeze(dim=1)
+#             ctx.squeeze_B = True
+#         if C.dim() == 3:
+#             C = C.unsqueeze(dim=1)
+#             ctx.squeeze_C = True
+#         ctx.delta_softplus = delta_softplus
+#         ctx.backnrows = backnrows
+#         out, x, *rest = selective_scan_cuda_core.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1)
+#         ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
+#         return out
+
+#     @staticmethod
+#     @torch.cuda.amp.custom_bwd
+#     def backward(ctx, dout, *args):
+#         u, delta, A, B, C, D, delta_bias, x = ctx.saved_tensors
+#         if dout.stride(-1) != 1:
+#             dout = dout.contiguous()
+#         du, ddelta, dA, dB, dC, dD, ddelta_bias, *rest = selective_scan_cuda_core.bwd(
+#             u, delta, A, B, C, D, delta_bias, dout, x, ctx.delta_softplus, 1
+#         )
+#         return (du, ddelta, dA, dB, dC, dD, ddelta_bias, None, None, None, None)
+
+
 class SelectiveScanCore(torch.autograd.Function):
     # comment all checks if inside cross_selective_scan
     @staticmethod
@@ -329,11 +370,10 @@ class SelectiveScanCore(torch.autograd.Function):
             C = C.unsqueeze(dim=1)
             ctx.squeeze_C = True
         ctx.delta_softplus = delta_softplus
-        ctx.backnrows = backnrows
         out, x, *rest = selective_scan_cuda_core.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1)
         ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
         return out
-
+    
     @staticmethod
     @torch.cuda.amp.custom_bwd
     def backward(ctx, dout, *args):
@@ -479,7 +519,7 @@ def cross_selective_scan_zigzag(
         # ==============================
         SelectiveScan=None,
         CrossScan=CrossScan_Zig,
-        CrossMerge=CrossMerge_Zig,
+        CrossMerge=CrossMerge,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -689,13 +729,13 @@ def zigzag_path(H, W, device='cpu'):
     W = int(W)
     paths = []
     for start_row, start_col, dir_row, dir_col in [
-        (0, 0, 1, 1),
-        (0, W - 1, 1, -1),
-        (H - 1, 0, -1, 1),
-        (H - 1, W - 1, -1, -1),
+        (0, 0, 1, 1),          # Top-left to bottom-right
+        (0, W - 1, 1, -1),     # Top-right to bottom-left
+        (H - 1, 0, -1, 1),     # Bottom-left to top-right
+        (H - 1, W - 1, -1, -1) # Bottom-right to top-left
     ]:
         paths.append(zigzag_path_lr(H, W, start_row, start_col, dir_row, dir_col))
-        paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
+        # paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
     for _index, _p in enumerate(paths):
         paths[_index] = torch.tensor(_p, device=device)
     return paths
