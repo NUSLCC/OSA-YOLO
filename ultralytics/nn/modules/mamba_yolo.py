@@ -1,6 +1,5 @@
 from .common_utils_mbyolo import *
-from .conv import CBAM
-__all__ = ("SimpleStem", "VisionClueMerge", "VSSBlock", "XSSBlock", "VSSBlock_Omni", "XSSBlock_Omni", "VSSBlock_Zig", "XSSBlock_Zig")
+__all__ = ("SimpleStem", "SimpleStem_New", "VisionClueMerge", "VisionClueMerge_New", "VSSBlock", "XSSBlock", "VSSBlock_Omni", "XSSBlock_Omni", "VSSBlock_Zig", "XSSBlock_Zig")
 import torch.nn.functional as F
 
 
@@ -40,6 +39,60 @@ class VisionClueMerge(nn.Module):
             x[..., 1::2, 1::2]
         ], dim=1)
         return self.pw_linear(y)
+
+
+class SimpleStem_New(nn.Module):
+    def __init__(self, inp, embed_dim, ks=3):
+        super().__init__()
+        self.hidden_dim = embed_dim // 2
+        self.stem = nn.Sequential(
+            # Initial aggressive downsampling
+            nn.Conv2d(inp, self.hidden_dim, ks, stride=2, 
+                     padding=autopad(ks), bias=False),
+            nn.BatchNorm2d(self.hidden_dim),
+            nn.SiLU(),
+            
+            # Depthwise separable convolution with proper stride
+            nn.Conv2d(self.hidden_dim, self.hidden_dim, ks, stride=2,
+                     padding=autopad(ks), groups=self.hidden_dim, bias=False),
+            nn.BatchNorm2d(self.hidden_dim),
+            nn.SiLU(),
+            
+            # Channel expansion
+            nn.Conv2d(self.hidden_dim, embed_dim, 1, bias=False),
+            nn.BatchNorm2d(embed_dim),
+            nn.SiLU()  # Final activation after SE
+        )
+
+    def forward(self, x):
+        return self.stem(x)
+
+
+class VisionClueMerge_New(nn.Module):
+    def __init__(self, dim, out_dim):
+        super().__init__()
+        self.hidden = int(dim * 4)
+
+        self.merge = nn.Sequential(
+            # Spatial mixing
+            nn.Conv2d(self.hidden, self.hidden, 3, padding=1, groups=self.hidden, bias=False),  # Depthwise
+            nn.BatchNorm2d(self.hidden),
+            nn.SiLU(),
+            
+            # Channel projection
+            nn.Conv2d(self.hidden, out_dim, 1, bias=False),
+            nn.BatchNorm2d(out_dim),
+            nn.SiLU()
+        )
+
+    def forward(self, x):
+        y = torch.cat([
+            x[..., ::2, ::2],  # Top-left
+            x[..., 1::2, ::2],  # Bottom-left
+            x[..., ::2, 1::2],  # Top-right
+            x[..., 1::2, 1::2]  # Bottom-right
+        ], dim=1)
+        return self.merge(y)
 
 
 class PatchMerging2D(nn.Module):
