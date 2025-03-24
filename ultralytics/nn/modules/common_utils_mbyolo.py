@@ -104,7 +104,7 @@ class CrossScan_Zig(torch.autograd.Function):
         B, C, H, W = x.shape
         ctx.shape = (B, C, H, W)
         zigzag_indices_list = zigzag_path(H, W, device=x.device)
-        xs = x.new_empty((B, len(zigzag_indices_list), C, H * W)) # B 8 C L
+        xs = x.new_empty((B, len(zigzag_indices_list), C, H * W)) # B 4 C L
         x_flat = x.view(B, C, H * W)
         for i, zigzag_indices in enumerate(zigzag_indices_list):
             xs[:, i] = x_flat[:, :, zigzag_indices]
@@ -517,7 +517,7 @@ def cross_selective_scan_zigzag(
         # ==============================
         SelectiveScan=None,
         CrossScan=CrossScan_Zig,
-        CrossMerge=CrossMerge_Zig,
+        CrossMerge=CrossMerge,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -725,13 +725,13 @@ def zigzag_path_tb(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
 def zigzag_path(H, W, device='cpu'):
     paths = []
     for start_row, start_col, dir_row, dir_col in [
-        (0, 0, 1, 1),
-        (0, W - 1, 1, -1),
-        (H - 1, 0, -1, 1),
-        (H - 1, W - 1, -1, -1),
+        (0, 0, 1, 1),          # Top-left to bottom-right
+        (0, W - 1, 1, -1),     # Top-right to bottom-left
+        (H - 1, 0, -1, 1),     # Bottom-left to top-right
+        (H - 1, W - 1, -1, -1) # Bottom-right to top-left
     ]:
         paths.append(zigzag_path_lr(H, W, start_row, start_col, dir_row, dir_col))
-        paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
+        # paths.append(zigzag_path_tb(H, W, start_row, start_col, dir_row, dir_col))
     for _index, _p in enumerate(paths):
         paths[_index] = torch.tensor(_p, device=device)
     return paths
