@@ -37,7 +37,7 @@ if __name__ == '__main__':
     }
     model_conf = opt.config
     task_type = {
-        "train": YOLO(model_conf).train(**args),
+        # "train": YOLO(model_conf).train(**args),
         "val": YOLO(model_conf).val(**args),
         # "test": YOLO(model_conf).test(**args),
     }

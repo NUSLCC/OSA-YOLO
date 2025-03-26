@@ -61,6 +61,7 @@ def get_ext():
             
     cc_flag.extend(["-gencode", "arch=compute_70,code=sm_70"])
     cc_flag.extend(["-gencode", "arch=compute_80,code=sm_80"])
+    cc_flag.extend(["-gencode", "arch=compute_87,code=sm_87"])
     if gencode_sm90:
         cc_flag.extend(["-gencode", "arch=compute_90,code=sm_90"])
     if multi_threads:
