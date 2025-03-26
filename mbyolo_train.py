@@ -1,7 +1,6 @@
 from ultralytics import YOLO
 import argparse
 
-
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='/home/lcc/UAVGIT/GitRepo/Mamba-YOLO-11/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
@@ -9,7 +8,7 @@ def parse_opt():
     parser.add_argument('--batch_size', type=int, default=4, help='batch size')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--task', default='train', help='train, val, test, speed or study')
-    parser.add_argument('--device', default="cuda", help='cuda device, i.e. 0 or 0,1 or cpu')
+    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1 or cpu')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--workers', type=int, default=4, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')

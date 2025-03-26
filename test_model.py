@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from ultralytics.nn.modules.block import A2C2f, HybridMambaAA
-from ultralytics.nn.modules.mamba_yolo import VSSBlock, VSSBlockOmni, XSSBlockOmni
+from ultralytics.nn.modules.mamba_yolo import SS2D, SS2D_Zig, VSSBlock, VSSBlock_Omni, VSSBlock_Zig, XSSBlock, XSSBlock_Omni, XSSBlock_Zig
 
 if __name__ == '__main__':
     
@@ -20,10 +20,22 @@ if __name__ == '__main__':
     # y = model3(x)
     # print(y.shape)
 
-    model4 = VSSBlockOmni(in_channels=64, hidden_dim=128).cuda()
-    y = model4(x)
-    print(y.shape)
+    # model4 = VSSBlock_Omni(in_channels=64, hidden_dim=128).cuda()
+    # y = model4(x)
+    # print(y.shape)
 
-    model5 = XSSBlockOmni(in_channels=64, hidden_dim=128).cuda()
-    y = model5(x)
+    # model5 = XSSBlock_Omni(in_channels=64, hidden_dim=128).cuda()
+    # y = model5(x)
+    # print(y.shape)
+    model = SS2D(d_model=64, d_state=128).cuda()
+    y = model(x)
+    print(y.shape)
+    model = SS2D_Zig(d_model=64, d_state=128).cuda()
+    y = model(x)
+    print(y.shape)
+    model = VSSBlock_Zig(in_channels=64, hidden_dim=128).cuda()
+    y = model(x)
+    print(y.shape)
+    model = XSSBlock_Zig(in_channels=64, hidden_dim=128).cuda()
+    y = model(x)
     print(y.shape)
