@@ -1,7 +1,6 @@
 from .common_utils_mbyolo import *
 __all__ = ("SimpleStem", "SimpleStem_New", "VisionClueMerge", "VisionClueMerge_New", "VSSBlock", "XSSBlock", "VSSBlock_Omni", "XSSBlock_Omni", "VSSBlock_Zig", "XSSBlock_Zig")
-import torch.nn.functional as F
-
+from einops import rearrange
 
 class SimpleStem(nn.Module):
     def __init__(self, inp, embed_dim, ks=3):
@@ -95,33 +94,6 @@ class VisionClueMerge_New(nn.Module):
         return self.merge(y)
 
 
-class PatchMerging2D(nn.Module):
-    def __init__(self, dim, out_dim=-1, norm_layer=nn.LayerNorm):
-        super().__init__()
-        self.dim = dim
-        self.reduction = nn.Linear(4 * dim, (2 * dim) if out_dim < 0 else out_dim, bias=False)
-        self.norm = norm_layer(4 * dim)
-
-    @staticmethod
-    def _patch_merging_pad(x: torch.Tensor):
-        H, W, _ = x.shape[-3:]
-        if (W % 2 != 0) or (H % 2 != 0):
-            x = F.pad(x, (0, 0, 0, W % 2, 0, H % 2))
-        x0 = x[..., 0::2, 0::2, :]  # ... H/2 W/2 C
-        x1 = x[..., 1::2, 0::2, :]  # ... H/2 W/2 C
-        x2 = x[..., 0::2, 1::2, :]  # ... H/2 W/2 C
-        x3 = x[..., 1::2, 1::2, :]  # ... H/2 W/2 C
-        x = torch.cat([x0, x1, x2, x3], -1)  # ... H/2 W/2 4*C
-        return x
-
-    def forward(self, x):
-        x = self._patch_merging_pad(x)
-        x = self.norm(x)
-        x = self.reduction(x)
-
-        return x
-
-
 class RGBlock(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0., channels_first=False):
         super().__init__()
@@ -165,6 +137,63 @@ class LSBlock(nn.Module):
         return x
 
 
+class DirectionalAttention(nn.Module):
+    def __init__(self, num_directions, hidden_dim):
+        super().__init__()
+        self.num_directions = num_directions
+        self.hidden_dim = hidden_dim
+        
+        # Projections for query/key/value
+        self.to_qkv = nn.Linear(hidden_dim, 3 * hidden_dim)
+        
+        # Dynamic direction weights (output shape: [B, num_directions])
+        self.dir_weight_net = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),  # Process per-direction features
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1)  # Output 1 weight per direction
+        )
+        
+        # Initialize bias for bottom-focused directions
+        self.dir_bias = nn.Parameter(torch.zeros(num_directions))
+        if num_directions == 4:
+            self.dir_bias.data[1] = 1.0  # Vertical top-to-bottom
+        elif num_directions == 8:
+            self.dir_bias.data[[1, 4, 5]] = 1.0  # Vertical/diagonal downward
+
+    def forward(self, x):
+        # Input: [B, H, W, C]
+        B, H, W, C = x.shape
+        
+        # Reshape to [B, num_directions, seq_len, C]
+        x = rearrange(x, 'b h w c -> b (h w) c')
+        x = rearrange(x, 'b (k l) c -> b k l c', k=self.num_directions)
+        
+        # Compute q, k, v (shape: [B, num_directions, seq_len, C])
+        qkv = self.to_qkv(x).chunk(3, dim=-1)
+        q, k, v = qkv
+        
+        # Compute direction weights (shape: [B, num_directions])
+        dir_feats = x.mean(dim=2)  # [B, num_directions, C] (average over sequence)
+        dir_weights = self.dir_weight_net(dir_feats).squeeze(-1)  # [B, num_directions]
+        dir_weights = dir_weights + self.dir_bias  # Add positional bias
+        dir_weights = torch.softmax(dir_weights, dim=-1)  # [B, num_directions]
+        
+        # Attention scores (query-key interaction)
+        scores = torch.einsum('bklc,bkmc->bklm', q, k) / (C ** 0.5)
+        scores = torch.softmax(scores, dim=-1)  # [B, K, L, L]
+        
+        # Apply attention to values
+        attended = torch.einsum('bklm,bkmc->bklc', scores, v)  # [B, K, L, C]
+        
+        # Weight directions
+        attended = attended * dir_weights.unsqueeze(-1).unsqueeze(-1)  # [B, K, L, C]
+        
+        # Reshape back to spatial format
+        x = rearrange(attended, 'b k l c -> b (k l) c')
+        x = rearrange(x, 'b (h w) c -> b h w c', h=H, w=W)
+        return x
+
+
 class SS2D(nn.Module):
     def __init__(
             self,
@@ -193,6 +222,7 @@ class SS2D(nn.Module):
         self.d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state  # 20240109
         self.d_conv = d_conv
         self.K = 4
+        self.directional_attention = DirectionalAttention(num_directions=self.K, hidden_dim=d_inner)
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -251,14 +281,12 @@ class SS2D(nn.Module):
 
         # simple init dt_projs, A_logs, Ds
         self.Ds = nn.Parameter(torch.ones((self.K * d_inner)))
-        self.A_logs = nn.Parameter(
-            torch.zeros((self.K * d_inner, self.d_state)))  # A == -A_logs.exp() < 0; # 0 < exp(A * dt) < 1
+        self.A_logs = nn.Parameter(torch.zeros((self.K * d_inner, self.d_state)))  # A == -A_logs.exp() < 0; # 0 < exp(A * dt) < 1
         self.dt_projs_weight = nn.Parameter(torch.randn((self.K, d_inner, self.dt_rank)))
         self.dt_projs_bias = nn.Parameter(torch.randn((self.K, d_inner)))
 
     @staticmethod
-    def dt_init(dt_rank, d_inner, dt_scale=1.0, dt_init="random", dt_min=0.001, dt_max=0.1, dt_init_floor=1e-4,
-                **factory_kwargs):
+    def dt_init(dt_rank, d_inner, dt_scale=1.0, dt_init="random", dt_min=0.001, dt_max=0.1, dt_init_floor=1e-4, **factory_kwargs):
         dt_proj = nn.Linear(dt_rank, d_inner, bias=True, **factory_kwargs)
 
         # Initialize special dt projection to preserve variance at initialization
@@ -327,6 +355,7 @@ class SS2D(nn.Module):
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
         )
+        x = self.directional_attention(x)  # Apply attention
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x
@@ -1256,6 +1285,7 @@ class OSSM(nn.Module):
         d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state
         self.d_conv = d_conv
         self.k_group = 8
+        self.directional_attention = DirectionalAttention(num_directions=self.k_group, hidden_dim=d_inner)
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):

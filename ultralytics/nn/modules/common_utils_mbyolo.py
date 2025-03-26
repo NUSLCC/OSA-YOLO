@@ -51,7 +51,6 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     return p
 
 
-# Cross Scan
 class CrossScan(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor):
@@ -158,24 +157,6 @@ class CrossMerge_Zig(torch.autograd.Function):
         xs = torch.stack(grads, dim=1)  # [B,8,C,H,W]
         return xs.view(B, 8, C, H, W)
 
-
-# class CrossMerge_Zig(torch.autograd.Function):
-#     @staticmethod
-#     def forward(ctx, ys: torch.Tensor):
-#         B, K, D, H, W = ys.shape
-#         ctx.shape = (H, W)
-#         # Use SUM instead of MEAN
-#         y = ys.sum(dim=1)  # Changed from mean to sum
-#         return y.view(B, D, -1)
-
-#     @staticmethod
-#     def backward(ctx, x: torch.Tensor):
-#         H, W = ctx.shape
-#         B, C, L = x.shape
-#         # Match the actual number of scans (8 in your case)
-#         xs = x.new_empty((B, 8, C, L))
-#         xs[:] = x.unsqueeze(1) / 8  # Divided by number of scans
-#         return xs.view(B, 8, C, H, W)
 
 # =============
 def antidiagonal_gather(tensor):
@@ -305,48 +286,6 @@ class CrossMerge_Omni(torch.autograd.Function):
         return xs.view(B, 8, C, H, W)
 
 
-# cross selective scan ===============================
-# class SelectiveScanCore(torch.autograd.Function):
-#     # comment all checks if inside cross_selective_scan
-#     @staticmethod
-#     @torch.cuda.amp.custom_fwd
-#     def forward(ctx, u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=False, nrows=1, backnrows=1,
-#                 oflex=True):
-#         # all in float
-#         if u.stride(-1) != 1:
-#             u = u.contiguous()
-#         if delta.stride(-1) != 1:
-#             delta = delta.contiguous()
-#         if D is not None and D.stride(-1) != 1:
-#             D = D.contiguous()
-#         if B.stride(-1) != 1:
-#             B = B.contiguous()
-#         if C.stride(-1) != 1:
-#             C = C.contiguous()
-#         if B.dim() == 3:
-#             B = B.unsqueeze(dim=1)
-#             ctx.squeeze_B = True
-#         if C.dim() == 3:
-#             C = C.unsqueeze(dim=1)
-#             ctx.squeeze_C = True
-#         ctx.delta_softplus = delta_softplus
-#         ctx.backnrows = backnrows
-#         out, x, *rest = selective_scan_cuda_core.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1)
-#         ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
-#         return out
-
-#     @staticmethod
-#     @torch.cuda.amp.custom_bwd
-#     def backward(ctx, dout, *args):
-#         u, delta, A, B, C, D, delta_bias, x = ctx.saved_tensors
-#         if dout.stride(-1) != 1:
-#             dout = dout.contiguous()
-#         du, ddelta, dA, dB, dC, dD, ddelta_bias, *rest = selective_scan_cuda_core.bwd(
-#             u, delta, A, B, C, D, delta_bias, dout, x, ctx.delta_softplus, 1
-#         )
-#         return (du, ddelta, dA, dB, dC, dD, ddelta_bias, None, None, None, None)
-
-
 class SelectiveScanCore(torch.autograd.Function):
     # comment all checks if inside cross_selective_scan
     @staticmethod
@@ -370,6 +309,7 @@ class SelectiveScanCore(torch.autograd.Function):
             C = C.unsqueeze(dim=1)
             ctx.squeeze_C = True
         ctx.delta_softplus = delta_softplus
+        ctx.backnrows = backnrows
         out, x, *rest = selective_scan_cuda_core.fwd(u, delta, A, B, C, D, delta_bias, delta_softplus, 1)
         ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
         return out
@@ -677,36 +617,6 @@ def cross_selective_scan_omni(
 
     return (y.to(x.dtype) if to_dtype else y)
 
-# def zigzag_path(N, device='cpu'):
-#     def zigzag_path_lr(N, start_row=0, start_col=0, dir_row=1, dir_col=1):
-#         path = []
-#         for i in range(N):
-#             for j in range(N):
-#                 col = j if i % 2 == 0 else N - 1 - j
-#                 path.append((start_row + dir_row * i) * N + start_col + dir_col * col)
-#         return path
-
-#     def zigzag_path_tb(N, start_row=0, start_col=0, dir_row=1, dir_col=1):
-#         path = []
-#         for j in range(N):
-#             for i in range(N):
-#                 row = i if j % 2 == 0 else N - 1 - i
-#                 path.append((start_row + dir_row * row) * N + start_col + dir_col * j)
-#         return path
-
-#     paths = []
-#     for start_row, start_col, dir_row, dir_col in [
-#         (0, 0, 1, 1),
-#         (0, N - 1, 1, -1),
-#         (N - 1, 0, -1, 1),
-#         (N - 1, N - 1, -1, -1),
-#     ]:
-#         paths.append(zigzag_path_lr(N, start_row, start_col, dir_row, dir_col))
-#         paths.append(zigzag_path_tb(N, start_row, start_col, dir_row, dir_col))
-
-#     for _index, _p in enumerate(paths):
-#         paths[_index] = torch.tensor(_p, device=device)
-#     return paths
 
 def zigzag_path_lr(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
     path = []
@@ -716,6 +626,7 @@ def zigzag_path_lr(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
             path.append((start_row + dir_row * i) * W + (start_col + dir_col * col))
     return path
 
+
 def zigzag_path_tb(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
     path = []
     for j in range(W):
@@ -723,6 +634,7 @@ def zigzag_path_tb(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
             row = i if j % 2 == 0 else H - 1 - i
             path.append((start_row + dir_row * row) * W + (start_col + dir_col * j))
     return path
+
 
 def zigzag_path(H, W, device='cpu'):
     H = int(H)
