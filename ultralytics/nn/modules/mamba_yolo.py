@@ -645,6 +645,7 @@ class SS2D_Zig(nn.Module):
         self.d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state  # 20240109
         self.d_conv = d_conv
         self.K = 8
+        self.directional_attention = DirectionalAttention(num_directions=self.K, hidden_dim=d_inner)
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -779,6 +780,7 @@ class SS2D_Zig(nn.Module):
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
         )
+        x = self.directional_attention(x)  # Apply attention
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x
@@ -1144,7 +1146,7 @@ class XSSBlock_Zig(nn.Module):
         self.hidden_dim = hidden_dim
         # ==========SSM============================
         self.norm = norm_layer(hidden_dim)
-        self.ss2d = nn.Sequential(*(SS2D(d_model=self.hidden_dim,
+        self.ss2d = nn.Sequential(*(SS2D_Zig(d_model=self.hidden_dim,
                                          d_state=ssm_d_state,
                                          ssm_ratio=ssm_ratio,
                                          ssm_rank_ratio=ssm_rank_ratio,
@@ -1215,7 +1217,7 @@ class VSSBlock_Zig(nn.Module):
 
         if self.ssm_branch:
             self.norm = norm_layer(hidden_dim)
-            self.op = SS2D(
+            self.op = SS2D_Zig(
                 d_model=hidden_dim,
                 d_state=ssm_d_state,
                 ssm_ratio=ssm_ratio,
@@ -1419,6 +1421,7 @@ class OSSM(nn.Module):
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
         )
+        x = self.directional_attention(x)  # Apply attention
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x
