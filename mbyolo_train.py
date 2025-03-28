@@ -1,6 +1,11 @@
 from ultralytics import YOLO
 import argparse
 
+task_name = 'mambayolo_omni_2442_8attention_aug180'
+
+from clearml import Task
+task = Task.init(project_name="mamba-yolo-omni-attention", task_name=task_name)
+
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='/home/chenchen/UAVGIT/Mamba-YOLO-11/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
@@ -17,6 +22,8 @@ def parse_opt():
     parser.add_argument('--name', default='mambayolo_ss2d_2442_4attention', help='save to project/name')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
+    parser.add_argument('--augment', default=True, help='Data augmentation')
+    parser.add_argument('--degrees', default=180, help='Data augmentation')
     opt = parser.parse_args()
     return opt
 

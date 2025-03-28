@@ -1,5 +1,8 @@
 from .common_utils_mbyolo import *
 __all__ = ("SimpleStem", "SimpleStem_New", "VisionClueMerge", "VisionClueMerge_New", "VSSBlock", "XSSBlock", "VSSBlock_Omni", "XSSBlock_Omni", "VSSBlock_Zig", "XSSBlock_Zig")
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
 class SimpleStem(nn.Module):
@@ -142,53 +145,49 @@ class DirectionalAttention(nn.Module):
         super().__init__()
         self.num_directions = num_directions
         self.hidden_dim = hidden_dim
-        
+
         # Projections for query/key/value
         self.to_qkv = nn.Linear(hidden_dim, 3 * hidden_dim)
-        
+
         # Dynamic direction weights (output shape: [B, num_directions])
         self.dir_weight_net = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),  # Process per-direction features
             nn.GELU(),
             nn.Linear(hidden_dim, 1)  # Output 1 weight per direction
         )
-        
+
         # Initialize bias for bottom-focused directions
         self.dir_bias = nn.Parameter(torch.zeros(num_directions))
-        if num_directions == 4:
-            self.dir_bias.data[1] = 1.0  # Vertical top-to-bottom
-        elif num_directions == 8:
-            self.dir_bias.data[[1, 4, 5]] = 1.0  # Vertical/diagonal downward
+        # if num_directions == 4:
+        #     self.dir_bias.data[1] = 1.0  # Vertical top-to-bottom
+        # elif num_directions == 8:
+        #     self.dir_bias.data[[1, 4, 5]] = 1.0  # Vertical/diagonal downward
 
     def forward(self, x):
         # Input: [B, H, W, C]
         B, H, W, C = x.shape
-        
+
         # Reshape to [B, num_directions, seq_len, C]
         x = rearrange(x, 'b h w c -> b (h w) c')
         x = rearrange(x, 'b (k l) c -> b k l c', k=self.num_directions)
-        
-        # Compute q, k, v (shape: [B, num_directions, seq_len, C])
+
+        # Compute q, k, v (each has shape: [B, num_directions, seq_len, C])
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         q, k, v = qkv
-        
-        # Compute direction weights (shape: [B, num_directions])
-        dir_feats = x.mean(dim=2)  # [B, num_directions, C] (average over sequence)
+
+        # Compute memory-efficient attention using PyTorch's native scaled_dot_product_attention.
+        # This avoids creating the full [B, num_directions, L, L] scores tensor.
+        attended = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+
+        # Compute dynamic direction weights (shape: [B, num_directions])
+        dir_feats = x.mean(dim=2)  # [B, num_directions, C]
         dir_weights = self.dir_weight_net(dir_feats).squeeze(-1)  # [B, num_directions]
-        dir_weights = dir_weights + self.dir_bias  # Add positional bias
-        dir_weights = torch.softmax(dir_weights, dim=-1)  # [B, num_directions]
-        
-        # Attention scores (query-key interaction)
-        scores = torch.einsum('bklc,bkmc->bklm', q, k) / (C ** 0.5)
-        scores = torch.softmax(scores, dim=-1)  # [B, K, L, L]
-        
-        # Apply attention to values
-        attended = torch.einsum('bklm,bkmc->bklc', scores, v)  # [B, K, L, C]
-        
+        dir_weights = torch.softmax(dir_weights + self.dir_bias, dim=-1)  # [B, num_directions]
+
         # Weight directions
-        attended = attended * dir_weights.unsqueeze(-1).unsqueeze(-1)  # [B, K, L, C]
-        
-        # Reshape back to spatial format
+        attended = attended * dir_weights.unsqueeze(-1).unsqueeze(-1)  # [B, num_directions, seq_len, C]
+
+        # Reshape back to spatial format: [B, H, W, C]
         x = rearrange(attended, 'b k l c -> b (k l) c')
         x = rearrange(x, 'b (h w) c -> b h w c', h=H, w=W)
         return x
