@@ -158,10 +158,10 @@ class DirectionalAttention(nn.Module):
 
         # Initialize bias for bottom-focused directions
         self.dir_bias = nn.Parameter(torch.zeros(num_directions))
-        if num_directions == 4:
-            self.dir_bias.data[1] = 1.0  # Vertical top-to-bottom
-        elif num_directions == 8:
-            self.dir_bias.data[[1, 4, 5]] = 1.0  # Vertical/diagonal downward
+        # if num_directions == 4:
+        #     self.dir_bias.data[1] = 1.0  # Vertical top-to-bottom
+        # elif num_directions == 8:
+        #     self.dir_bias.data[[1, 4, 5]] = 1.0  # Vertical/diagonal downward
 
     def forward(self, x):
         # Input: [B, H, W, C]
