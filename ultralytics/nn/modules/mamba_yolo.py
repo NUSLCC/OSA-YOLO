@@ -146,50 +146,66 @@ class DirectionalAttention(nn.Module):
         self.num_directions = num_directions
         self.hidden_dim = hidden_dim
 
-        # Projections for query/key/value
         self.to_qkv = nn.Linear(hidden_dim, 3 * hidden_dim)
 
-        # Dynamic direction weights (output shape: [B, num_directions])
         self.dir_weight_net = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),  # Process per-direction features
+            nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, 1)  # Output 1 weight per direction
+            nn.Linear(hidden_dim, 1)
         )
 
-        # Initialize bias for bottom-focused directions
         self.dir_bias = nn.Parameter(torch.zeros(num_directions))
-        # if num_directions == 4:
-        #     self.dir_bias.data[1] = 1.0  # Vertical top-to-bottom
-        # elif num_directions == 8:
-        #     self.dir_bias.data[[1, 4, 5]] = 1.0  # Vertical/diagonal downward
 
     def forward(self, x):
-        # Input: [B, H, W, C]
         B, H, W, C = x.shape
+        S = H * W
+        k = self.num_directions
 
-        # Reshape to [B, num_directions, seq_len, C]
-        x = rearrange(x, 'b h w c -> b (h w) c')
-        x = rearrange(x, 'b (k l) c -> b k l c', k=self.num_directions)
+        # Calculate padding to make sequence length divisible by num_directions
+        pad_size = (k - (S % k)) % k
+        x_padded = rearrange(x, 'b h w c -> b (h w) c')
+        mask = torch.ones(B, S, 1, device=x.device, dtype=x.dtype)
+        if pad_size > 0:
+            x_padded = F.pad(x_padded, (0, 0, 0, pad_size))  # Pad along sequence dimension
+            mask = F.pad(mask, (0, 0, 0, pad_size))
 
-        # Compute q, k, v (each has shape: [B, num_directions, seq_len, C])
-        qkv = self.to_qkv(x).chunk(3, dim=-1)
+        # Reshape into [B, k, l_padded, C] and create mask
+        l_padded = (S + pad_size) // k
+        x_reshaped = rearrange(x_padded, 'b (k l) c -> b k l c', k=k)
+        mask_reshaped = rearrange(mask, 'b (k l) c -> b k l c', k=k)
+
+        # Compute q, k, v
+        qkv = self.to_qkv(x_reshaped).chunk(3, dim=-1)
         q, k, v = qkv
 
-        # Compute memory-efficient attention using PyTorch's native scaled_dot_product_attention.
-        # This avoids creating the full [B, num_directions, L, L] scores tensor.
-        attended = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+        # Create attention mask to ignore padded elements
+        valid_mask = mask_reshaped.squeeze(-1)  # [B, k, l_padded]
+        attn_mask = valid_mask[:, :, None, :]  # [B, k, 1, l_padded] (broadcast to keys)
 
-        # Compute dynamic direction weights (shape: [B, num_directions])
-        dir_feats = x.mean(dim=2)  # [B, num_directions, C]
-        dir_weights = self.dir_weight_net(dir_feats).squeeze(-1)  # [B, num_directions]
-        dir_weights = torch.softmax(dir_weights + self.dir_bias, dim=-1)  # [B, num_directions]
+        # Apply scaled dot product attention with mask
+        attended = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=(attn_mask > 0).to(q.dtype),  # Mask padded keys
+            dropout_p=0.0, is_causal=False
+        )
+
+        # Compute dynamic direction weights (masked mean)
+        sum_features = (x_reshaped * mask_reshaped).sum(dim=2)  # [B, k, C]
+        num_elements = mask_reshaped.sum(dim=2).clamp(min=1e-6)  # [B, k, 1]
+        dir_feats = sum_features / num_elements
+
+        dir_weights = self.dir_weight_net(dir_feats).squeeze(-1)
+        dir_weights = torch.softmax(dir_weights + self.dir_bias, dim=-1)
 
         # Weight directions
-        attended = attended * dir_weights.unsqueeze(-1).unsqueeze(-1)  # [B, num_directions, seq_len, C]
+        attended = attended * dir_weights.unsqueeze(-1).unsqueeze(-1)
 
-        # Reshape back to spatial format: [B, H, W, C]
-        x = rearrange(attended, 'b k l c -> b (k l) c')
-        x = rearrange(x, 'b (h w) c -> b h w c', h=H, w=W)
+        # Reshape back and remove padding
+        attended = rearrange(attended, 'b k l c -> b (k l) c')
+        if pad_size > 0:
+            attended = attended[:, :S, :]  # Truncate padding
+
+        x = rearrange(attended, 'b (h w) c -> b h w c', h=H, w=W)
         return x
 
 
