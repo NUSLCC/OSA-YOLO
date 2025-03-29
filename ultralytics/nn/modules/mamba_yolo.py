@@ -3,7 +3,7 @@ __all__ = ("SimpleStem", "SimpleStem_New", "VisionClueMerge", "VisionClueMerge_N
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
+
 
 class SimpleStem(nn.Module):
     def __init__(self, inp, embed_dim, ks=3):
@@ -139,74 +139,61 @@ class LSBlock(nn.Module):
         x = input + self.drop(x)
         return x
 
+# from einops import rearrange
+# class DirectionalAttention(nn.Module):
+#     def __init__(self, input_dim, num_directions, hidden_dim=256):
+#         super().__init__()
+#         self.num_directions = num_directions
+#         self.hidden_dim = hidden_dim
+#         self.conv = nn.Conv2d(input_dim, self.hidden_dim, kernel_size=3, padding=1, groups=self.num_directions, bias=False)
+        
+#         # Projections for query/key/value
+#         self.to_qkv = nn.Linear(self.hidden_dim, 3 * self.hidden_dim)
 
-class DirectionalAttention(nn.Module):
-    def __init__(self, num_directions, hidden_dim):
-        super().__init__()
-        self.num_directions = num_directions
-        self.hidden_dim = hidden_dim
+#         # Dynamic direction weights (output shape: [B, num_directions])
+#         self.dir_weight_net = nn.Sequential(
+#             nn.Linear(self.hidden_dim, self.hidden_dim),  # Process per-direction features
+#             nn.GELU(),
+#             nn.Linear(self.hidden_dim, 1)  # Output 1 weight per direction
+#         )
 
-        self.to_qkv = nn.Linear(hidden_dim, 3 * hidden_dim)
+#         # Initialize bias for bottom-focused directions
+#         self.dir_bias = nn.Parameter(torch.zeros(num_directions))
+#         if num_directions == 4:
+#             self.dir_bias.data[1] = 1.0  # Vertical top-to-bottom
+#         elif num_directions == 8:
+#             self.dir_bias.data[[1, 4, 5]] = 1.0  # Vertical/diagonal downward
 
-        self.dir_weight_net = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, 1)
-        )
+#     def forward(self, x):
+#         # Input: [B, H, W, C]
+#         B, H, W, C = x.shape
+#         # Apply convolution to get per-direction features
+#         x = x.permute(0, 3, 1, 2).contiguous() # [B, C, H, W]
+#         x = self.conv(x)  # [B, num_directions * hidden_dim, H, W]
 
-        self.dir_bias = nn.Parameter(torch.zeros(num_directions))
+#         # Reshape to [B, num_directions, seq_len, C]
+#         x = rearrange(x, 'b h w c -> b (h w) c')
+#         x = rearrange(x, 'b (k l) c -> b k l c', k=self.num_directions)
 
-    def forward(self, x):
-        B, H, W, C = x.shape
-        S = H * W
-        k = self.num_directions
+#         # Compute q, k, v (each has shape: [B, num_directions, seq_len, C])
+#         qkv = self.to_qkv(x).chunk(3, dim=-1)
+#         q, k, v = qkv
 
-        # Calculate padding to make sequence length divisible by num_directions
-        pad_size = (k - (S % k)) % k
-        x_padded = rearrange(x, 'b h w c -> b (h w) c')
-        mask = torch.ones(B, S, 1, device=x.device, dtype=x.dtype)
-        if pad_size > 0:
-            x_padded = F.pad(x_padded, (0, 0, 0, pad_size))  # Pad along sequence dimension
-            mask = F.pad(mask, (0, 0, 0, pad_size))
+#         # Compute memory-efficient attention using PyTorch's native scaled_dot_product_attention.
+#         # This avoids creating the full [B, num_directions, L, L] scores tensor.
+#         attended = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
 
-        # Reshape into [B, k, l_padded, C] and create mask
-        l_padded = (S + pad_size) // k
-        x_reshaped = rearrange(x_padded, 'b (k l) c -> b k l c', k=k)
-        mask_reshaped = rearrange(mask, 'b (k l) c -> b k l c', k=k)
+#         # Compute dynamic direction weights (shape: [B, num_directions])
+#         dir_feats = x.mean(dim=2)  # [B, num_directions, C]
+#         dir_weights = self.dir_weight_net(dir_feats).squeeze(-1)  # [B, num_directions]
+#         dir_weights = torch.softmax(dir_weights + self.dir_bias, dim=-1)  # [B, num_directions]
+#         # Weight directions
+#         attended = attended * dir_weights.unsqueeze(-1).unsqueeze(-1)  # [B, num_directions, seq_len, C]
 
-        # Compute q, k, v
-        qkv = self.to_qkv(x_reshaped).chunk(3, dim=-1)
-        q, k, v = qkv
-
-        # Create attention mask to ignore padded elements
-        valid_mask = mask_reshaped.squeeze(-1)  # [B, k, l_padded]
-        attn_mask = valid_mask[:, :, None, :]  # [B, k, 1, l_padded] (broadcast to keys)
-
-        # Apply scaled dot product attention with mask
-        attended = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=(attn_mask > 0).to(q.dtype),  # Mask padded keys
-            dropout_p=0.0, is_causal=False
-        )
-
-        # Compute dynamic direction weights (masked mean)
-        sum_features = (x_reshaped * mask_reshaped).sum(dim=2)  # [B, k, C]
-        num_elements = mask_reshaped.sum(dim=2).clamp(min=1e-6)  # [B, k, 1]
-        dir_feats = sum_features / num_elements
-
-        dir_weights = self.dir_weight_net(dir_feats).squeeze(-1)
-        dir_weights = torch.softmax(dir_weights + self.dir_bias, dim=-1)
-
-        # Weight directions
-        attended = attended * dir_weights.unsqueeze(-1).unsqueeze(-1)
-
-        # Reshape back and remove padding
-        attended = rearrange(attended, 'b k l c -> b (k l) c')
-        if pad_size > 0:
-            attended = attended[:, :S, :]  # Truncate padding
-
-        x = rearrange(attended, 'b (h w) c -> b h w c', h=H, w=W)
-        return x
+#         # Reshape back to spatial format: [B, H, W, C]
+#         x = rearrange(attended, 'b k l c -> b (k l) c')
+#         x = rearrange(x, 'b (h w) c -> b h w c', h=H, w=W)
+#         return x
 
 
 class SS2D(nn.Module):
@@ -1274,6 +1261,58 @@ class VSSBlock_Zig(nn.Module):
         return x
 
 
+class DirectionalAttention(nn.Module):
+    def __init__(self, in_channels, attn_hidden_channels=16, num_directions=8):
+        """
+        Computes an attention map for each of the 8 directional feature maps.
+        
+        Args:
+            in_channels (int): Number of input channels per directional feature map.
+            attn_hidden_channels (int): Hidden channels for the attention subnetwork.
+            num_directions (int): Number of directional feature maps (default is 8).
+        """
+        super().__init__()
+        self.num_directions = num_directions
+        # Create one attention submodule per direction.
+        self.attn_modules = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(in_channels, attn_hidden_channels, kernel_size=1),
+                nn.ReLU(),
+                nn.Conv2d(attn_hidden_channels, 1, kernel_size=1)
+            )
+            for _ in range(num_directions)
+        ])
+        
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, 8, D, H, W) where each slice along
+                              the second dimension corresponds to a directional feature map.
+                              
+        Returns:
+            torch.Tensor: Attention tensor of shape (B, 8, 1, H, W)
+                          that can be used to modulate the directional features.
+        """
+        B, K, D, H, W = x.shape
+        assert K == self.num_directions, f"Expected {self.num_directions} directional feature maps but got {K}."
+        
+        attn_outs = []
+        for k in range(self.num_directions):
+            # Extract the k-th directional feature map: shape (B, D, H, W)
+            feat = x[:, k]
+            # Compute raw attention scores for this direction: shape (B, 1, H, W)
+            attn_k = self.attn_modules[k](feat)
+            # Flatten spatial dimensions (H, W) and apply softmax so that weights sum to 1 per map
+            attn_k = attn_k.view(B, -1)  # shape (B, H*W)
+            attn_k = F.softmax(attn_k, dim=1)
+            attn_k = attn_k.view(B, 1, H, W)  # reshape back to (B, 1, H, W)
+            attn_outs.append(attn_k)
+            
+        # Stack the attention maps from all directions: shape (B, 8, 1, H, W)
+        attn = torch.stack(attn_outs, dim=1)
+        return attn
+
+
 class OSSM(nn.Module):
     def __init__(
         self,
@@ -1302,7 +1341,7 @@ class OSSM(nn.Module):
         d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state
         self.d_conv = d_conv
         self.k_group = 8
-        self.directional_attention = DirectionalAttention(num_directions=self.k_group, hidden_dim=d_inner)
+        self.directional_attention = DirectionalAttention(in_channels=d_inner, attn_hidden_channels=16, num_directions=self.k_group)
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -1429,19 +1468,38 @@ class OSSM(nn.Module):
             x = x.permute(0, 3, 1, 2).contiguous()
         if self.ssm_low_rank:
             x = self.in_rank(x)
-        x = cross_selective_scan(
+        ys = cross_selective_scan(
             x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
             self.A_logs, self.Ds,
-            out_norm=getattr(self, "out_norm", None),
-            out_norm_shape=getattr(self, "out_norm_shape", "v0"),
-            delta_softplus=True, force_fp32=force_fp32,
-            SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
+            delta_softplus=True, to_dtype=True, force_fp32=force_fp32,
+            ssoflex=self.training, SelectiveScan=SelectiveScan
         )
-        x = self.directional_attention(x)  # Apply attention
+
+        ys_attn = self.directional_attention(ys)  # Apply attention
+        x = cross_selective_merge_omni(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"),)
+        
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x
-
+    
+    # def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan_omni, force_fp32=None):
+    #     force_fp32 = (self.training and (not self.disable_force32)) if force_fp32 is None else force_fp32
+    #     if not channel_first:
+    #         x = x.permute(0, 3, 1, 2).contiguous()
+    #     if self.ssm_low_rank:
+    #         x = self.in_rank(x)
+    #     x = cross_selective_scan(
+    #         x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
+    #         self.A_logs, self.Ds,
+    #         out_norm=getattr(self, "out_norm", None),
+    #         out_norm_shape=getattr(self, "out_norm_shape", "v0"),
+    #         delta_softplus=True, force_fp32=force_fp32,
+    #         SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
+    #     )
+    #     # x = self.directional_attention(x)  # Apply attention
+    #     if self.ssm_low_rank:
+    #         x = self.out_rank(x)
+    #     return x
 
     def forward(self, x: torch.Tensor, **kwargs):
         with_dconv = (self.d_conv > 1)

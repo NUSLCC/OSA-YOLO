@@ -4,7 +4,7 @@ import os
 import torch
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_omni_2442_8attention_aug180_real'
+task_name = 'mambayolo_omni_2442_8attn_merge_aug180'
 
 from clearml import Task
 task = Task.init(project_name="mamba-yolo-omni-attention", task_name=task_name)
@@ -18,11 +18,11 @@ def parse_opt():
     parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni.yaml', help='model path(s)')
     parser.add_argument('--data', type=str, default=current_path+'/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
     parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--batch', type=int, default=80, help='batch size')
+    parser.add_argument('--batch', type=int, default=12, help='batch size')
     parser.add_argument('--imgsz', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--cache', default=True, help='cache images for faster training')
-    parser.add_argument('--device', default=[0,1,2,3,4], help='cuda device, i.e. 0 or 0,1 or cpu')
-    parser.add_argument('--workers', type=int, default=20, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1 or cpu')
+    parser.add_argument('--workers', type=int, default=32, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--project', type=str, default=current_path+'/output_dir/mamba_yolo_attention', help='save to project/name')
     parser.add_argument('--name', type=str, default=task_name, help='save to project/name')
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')
