@@ -1,29 +1,43 @@
 from ultralytics import YOLO
 import argparse
+import os
+import torch
+torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_omni_2442_8attention_aug180'
+task_name = 'mambayolo_omni_2442_8attention_aug180_real'
 
 from clearml import Task
 task = Task.init(project_name="mamba-yolo-omni-attention", task_name=task_name)
 
+current_path = os.path.abspath(os.getcwd())
+
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='/home/lcc/UAVGIT/Mamba-YOLO-11/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
-    parser.add_argument('--config', type=str, default='/home/lcc/UAVGIT/Mamba-YOLO-11/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni.yaml', help='model path(s)')
-    parser.add_argument('--batch_size', type=int, default=14, help='batch size')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--task', default='train', help='train, val, test, speed or study')
-    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1 or cpu')
+    parser.add_argument('--task', default='detect', help='train, val, test, speed or study')
+    # Training settings
+    parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni.yaml', help='model path(s)')
+    parser.add_argument('--data', type=str, default=current_path+'/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
     parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--workers', type=int, default=32, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--batch', type=int, default=80, help='batch size')
+    parser.add_argument('--imgsz', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--cache', default=True, help='cache images for faster training')
+    parser.add_argument('--device', default=[0,1,2,3,4], help='cuda device, i.e. 0 or 0,1 or cpu')
+    parser.add_argument('--workers', type=int, default=20, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--project', type=str, default=current_path+'/output_dir/mamba_yolo_attention', help='save to project/name')
+    parser.add_argument('--name', type=str, default=task_name, help='save to project/name')
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')
-    parser.add_argument('--amp', default=True, action='store_true', help='# Use automatic mixed precision')
-    parser.add_argument('--project', default='/home/lcc/UAVGIT/Mamba-YOLO-11/output_dir/mamba_yolo_attention_aug', help='save to project/name')
-    parser.add_argument('--name', default=task_name, help='save to project/name')
-    parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
-    parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
+    parser.add_argument('--amp', default=True,  help='# Use automatic mixed precision')
+    # Val settings
+    parser.add_argument('--half', default=False, help='use FP16 half-precision inference')
+    parser.add_argument('--dnn', default=False, help='use OpenCV DNN for ONNX inference')
+    # Predict settings
     parser.add_argument('--augment', default=True, help='Data augmentation')
-    parser.add_argument('--degrees', default=180, help='Data augmentation')
+    # Export settings
+    parser.add_argument('--int8', default=False, help='INT8 quantization')
+    parser.add_argument('--simplify', default=False, help='simplify ONNX model')
+    parser.add_argument('--workspace', type=int, default=4, help='TensorRT: workspace size (GB)')
+    # Hyperparameters
+    parser.add_argument('--degrees', type=float, default=180, help='Data augmentation')
     opt = parser.parse_args()
     return opt
 
@@ -32,17 +46,27 @@ if __name__ == '__main__':
     opt = parse_opt()
     task = opt.task
     args = {
+        "task": task,
         "data": opt.data,
         "epochs": opt.epochs,
-        "workers": opt.workers,
-        "batch": opt.batch_size,
-        "optimizer": opt.optimizer,
+        "batch": opt.batch,
+        "imgsz": opt.imgsz,
+        "cache": opt.cache,
         "device": opt.device,
-        "amp": opt.amp,
+        "workers": opt.workers,
         "project": opt.project,
         "name": opt.name,
+        "optimizer": opt.optimizer,
+        "amp": opt.amp,
+        "half": opt.half,
+        "dnn": opt.dnn,
+        "augment": opt.augment,
+        "int8": opt.int8,
+        "simplify": opt.simplify,
+        "workspace": opt.workspace,
+        "degrees": opt.degrees,
     }
-    model_conf = opt.config
+    model_conf = opt.model
     task_type = {
         "train": YOLO(model_conf).train(**args),
         "val": YOLO(model_conf).val(**args),
