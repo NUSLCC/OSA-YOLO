@@ -237,7 +237,7 @@ class SS2D(nn.Module):
         self.d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state  # 20240109
         self.d_conv = d_conv
         self.K = 4
-        self.directional_attention = DirectionalAttention(num_directions=self.K, hidden_dim=d_inner)
+        # self.directional_attention = DirectionalAttention(num_directions=self.K, hidden_dim=d_inner)
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -370,7 +370,7 @@ class SS2D(nn.Module):
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
         )
-        x = self.directional_attention(x)  # Apply attention
+        # x = self.directional_attention(x)  # Apply attention
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x
