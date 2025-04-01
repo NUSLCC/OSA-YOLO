@@ -786,13 +786,13 @@ def cross_selective_merge_ss2d(
     ys = ys * ys_attn  # Both: (B, 4, D, H, W) * (B, 4, 1, H, W)
     B, K, D, H, W = ys.shape
     # ZSJ 这里把处理之后的序列融合起来，并还原回原来的矩阵形式
-    y: torch.Tensor = CrossMerge.apply(ys)
+    y: torch.Tensor = CrossMerge.apply(ys) # (B, D, H*W)
 
     if out_norm_shape in ["v1"]: # (B, C, H, W)
         y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1) # (B, H, W, C)
-    else: # (B, L, C)
+    else: # (B, C, L)
         y = y.transpose(dim0=1, dim1=2).contiguous() # (B, L, C)
-        y = out_norm(y).view(B, H, W, -1)
+        y = out_norm(y).view(B, H, W, -1) # (B, H, W, C)
     return y
 
 

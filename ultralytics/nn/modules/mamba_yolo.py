@@ -224,7 +224,8 @@ class SS2D(nn.Module):
         self.d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state  # 20240109
         self.d_conv = d_conv
         self.K = 4
-        self.directional_attention = DirectionalAttention(in_channels=d_inner, attn_hidden_channels=16, num_directions=self.K)
+        # self.directional_attention = DirectionalAttention(in_channels=d_inner, attn_hidden_channels=16, num_directions=self.K)
+        self.weights = nn.Parameter(torch.ones(self.K))
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -356,8 +357,11 @@ class SS2D(nn.Module):
             delta_softplus=True, to_dtype=True, force_fp32=force_fp32, # output fp32
             ssoflex=self.training, SelectiveScan=SelectiveScan
         )
-        ys_attn = self.directional_attention(ys)  # Apply attention
-        x = cross_selective_merge_ss2d(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"))
+        
+        # ys_attn = self.directional_attention(ys)  # Apply attention
+        # x = cross_selective_merge_ss2d(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"))
+        w = F.softmax(self.weights, dim=0).view(1, 4, 1, 1, 1)
+        x = cross_selective_merge_ss2d(ys=ys, ys_attn=w, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"))
         
         # x = cross_selective_scan(
         #     x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
