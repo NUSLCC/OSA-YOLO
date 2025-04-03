@@ -1350,7 +1350,7 @@ class OSSM(nn.Module):
         d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state
         self.d_conv = d_conv
         self.k_group = 8
-        self.directional_attention = DirectionalAttention(in_channels=d_inner, attn_hidden_channels=16, num_directions=self.k_group)
+        self.directional_attention = DirectionalAttention_after_merge(in_channels=d_inner, num_directions=self.k_group)
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -1471,44 +1471,44 @@ class OSSM(nn.Module):
         D._no_weight_decay = True
         return D
 
-    def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan_omni, force_fp32=None):
-        force_fp32 = (self.training and (not self.disable_force32)) if force_fp32 is None else force_fp32
-        if not channel_first:
-            x = x.permute(0, 3, 1, 2).contiguous()
-        if self.ssm_low_rank:
-            x = self.in_rank(x)
-        ys = cross_selective_scan(
-            x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
-            self.A_logs, self.Ds,
-            delta_softplus=True, to_dtype=True, force_fp32=force_fp32,
-            ssoflex=self.training, SelectiveScan=SelectiveScan
-        )
-
-        ys_attn = self.directional_attention(ys)  # Apply attention
-        x = cross_selective_merge_omni(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"),)
-        
-        if self.ssm_low_rank:
-            x = self.out_rank(x)
-        return x
-    
     # def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan_omni, force_fp32=None):
     #     force_fp32 = (self.training and (not self.disable_force32)) if force_fp32 is None else force_fp32
     #     if not channel_first:
     #         x = x.permute(0, 3, 1, 2).contiguous()
     #     if self.ssm_low_rank:
     #         x = self.in_rank(x)
-    #     x = cross_selective_scan(
+    #     ys = cross_selective_scan(
     #         x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
     #         self.A_logs, self.Ds,
-    #         out_norm=getattr(self, "out_norm", None),
-    #         out_norm_shape=getattr(self, "out_norm_shape", "v0"),
-    #         delta_softplus=True, force_fp32=force_fp32,
-    #         SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
+    #         delta_softplus=True, to_dtype=True, force_fp32=force_fp32,
+    #         ssoflex=self.training, SelectiveScan=SelectiveScan
     #     )
-    #     # x = self.directional_attention(x)  # Apply attention
+
+    #     ys_attn = self.directional_attention(ys)  # Apply attention
+    #     x = cross_selective_merge_omni(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"),)
+        
     #     if self.ssm_low_rank:
     #         x = self.out_rank(x)
     #     return x
+    
+    def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan_omni_together, force_fp32=None):
+        force_fp32 = (self.training and (not self.disable_force32)) if force_fp32 is None else force_fp32
+        if not channel_first:
+            x = x.permute(0, 3, 1, 2).contiguous()
+        if self.ssm_low_rank:
+            x = self.in_rank(x)
+        x = cross_selective_scan(
+            x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
+            self.A_logs, self.Ds,
+            out_norm=getattr(self, "out_norm", None),
+            out_norm_shape=getattr(self, "out_norm_shape", "v0"),
+            delta_softplus=True, force_fp32=force_fp32,
+            SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
+        )
+        x = self.directional_attention(x)  # Apply attention
+        if self.ssm_low_rank:
+            x = self.out_rank(x)
+        return x
 
     def forward(self, x: torch.Tensor, **kwargs):
         with_dconv = (self.d_conv > 1)
