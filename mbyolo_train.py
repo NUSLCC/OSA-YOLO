@@ -4,10 +4,10 @@ import os
 import torch
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_omni_2442_8attention_aug180'
+task_name = 'mambayolo_omni_2442_8weights_aug180'
 
-from clearml import Task
-task = Task.init(project_name="mamba-yolo-omni-attention", task_name=task_name)
+# from clearml import Task
+# task = Task.init(project_name="mamba-yolo-omni-attention", task_name=task_name)
 
 current_path = os.path.abspath(os.getcwd())
 

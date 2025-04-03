@@ -1413,7 +1413,8 @@ class OSSM(nn.Module):
         d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state
         self.d_conv = d_conv
         self.k_group = 8
-        self.directional_attention = DirectionalAttention_after_merge(in_channels=d_inner, num_directions=self.k_group)
+        # self.directional_attention = DirectionalAttention_after_merge(in_channels=d_inner, num_directions=self.k_group)
+        self.weights = nn.Parameter(torch.ones(self.k_group))
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -1568,7 +1569,18 @@ class OSSM(nn.Module):
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
         )
-        x = self.directional_attention(x)  # Apply attention
+        
+        # x = self.directional_attention(x)  # Apply attention
+
+        B, H, W, C = x.shape
+        group_size = C // 8
+        # Reshape x to separate 8 channel groups
+        x_grouped = x.view(B, H, W, 8, group_size)  # [B, H, W, 8, group_size]
+        # Apply weights: [8] -> [1, 1, 1, 8, 1] to broadcast across batch/spatial/group_size
+        x_weighted = x_grouped * self.weights.view(1, 1, 1, 8, 1)
+        # Merge back to original shape
+        x = x_weighted.view(B, H, W, C)
+        
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x
