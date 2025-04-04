@@ -285,7 +285,7 @@ class SS2D(nn.Module):
         self.d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state  # 20240109
         self.d_conv = d_conv
         self.K = 4
-        self.directional_attention = DirectionalAttention(in_channels=d_inner, attn_hidden_channels=16, num_directions=self.K)
+        # self.directional_attention = DirectionalAttention(in_channels=d_inner, attn_hidden_channels=16, num_directions=self.K)
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -410,26 +410,23 @@ class SS2D(nn.Module):
             x = x.permute(0, 3, 1, 2).contiguous()
         if self.ssm_low_rank:
             x = self.in_rank(x)
-        
-        ys = cross_selective_scan(
+        x = cross_selective_scan(
             x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
             self.A_logs, self.Ds,
-            delta_softplus=True, to_dtype=True, force_fp32=force_fp32, # output fp32
-            ssoflex=self.training, SelectiveScan=SelectiveScan
+            out_norm=getattr(self, "out_norm", None),
+            out_norm_shape=getattr(self, "out_norm_shape", "v0"),
+            delta_softplus=True, force_fp32=force_fp32,
+            SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
         )
-        ys_attn = self.directional_attention(ys)  # Apply attention
-        x = cross_selective_merge_ss2d(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"))
-        
-        # x = cross_selective_scan(
+        # ys = cross_selective_scan(
         #     x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
         #     self.A_logs, self.Ds,
-        #     out_norm=getattr(self, "out_norm", None),
-        #     out_norm_shape=getattr(self, "out_norm_shape", "v0"),
-        #     delta_softplus=True, force_fp32=force_fp32,
-        #     SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
+        #     delta_softplus=True, to_dtype=True, force_fp32=force_fp32, # output fp32
+        #     ssoflex=self.training, SelectiveScan=SelectiveScan
         # )
-        # x = self.directional_attention(x)  # Apply attention
-        
+        # ys_attn = self.directional_attention(ys)  # Apply attention
+        # x = cross_selective_merge_ss2d(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"))
+                
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x
@@ -1414,7 +1411,7 @@ class OSSM(nn.Module):
         self.d_conv = d_conv
         self.k_group = 8
         # self.directional_attention = DirectionalAttention_after_merge(in_channels=d_inner, num_directions=self.k_group)
-        self.weights = nn.Parameter(torch.ones(self.k_group))
+        # self.weights = nn.Parameter(torch.ones(self.k_group))
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -1571,15 +1568,14 @@ class OSSM(nn.Module):
         )
         
         # x = self.directional_attention(x)  # Apply attention
-
-        B, H, W, C = x.shape
-        group_size = C // 8
-        # Reshape x to separate 8 channel groups
-        x_grouped = x.view(B, H, W, 8, group_size)  # [B, H, W, 8, group_size]
-        # Apply weights: [8] -> [1, 1, 1, 8, 1] to broadcast across batch/spatial/group_size
-        x_weighted = x_grouped * self.weights.view(1, 1, 1, 8, 1)
-        # Merge back to original shape
-        x = x_weighted.view(B, H, W, C)
+        # B, H, W, C = x.shape
+        # group_size = C // 8
+        # # Reshape x to separate 8 channel groups
+        # x_grouped = x.view(B, H, W, 8, group_size)  # [B, H, W, 8, group_size]
+        # # Apply weights: [8] -> [1, 1, 1, 8, 1] to broadcast across batch/spatial/group_size
+        # x_weighted = x_grouped * self.weights.view(1, 1, 1, 8, 1)
+        # # Merge back to original shape
+        # x = x_weighted.view(B, H, W, C)
         
         if self.ssm_low_rank:
             x = self.out_rank(x)
