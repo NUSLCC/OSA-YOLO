@@ -4,7 +4,7 @@ import os
 import torch
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_omni_2442_a2c2f_aug180'
+task_name = 'mambayolo_omni_2442_cbam_aug180'
 
 from clearml import Task
 task = Task.init(project_name="mamba-yolo-omni", task_name=task_name)
@@ -15,7 +15,7 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', default='detect', help='train, val, test, speed or study')
     # Training settings
-    parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni-A2C2F.yaml', help='model path(s)')
+    parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni-CBAM.yaml', help='model path(s)')
     parser.add_argument('--data', type=str, default=current_path+'/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch', type=int, default=16, help='batch size')
