@@ -251,23 +251,32 @@ class CrossScan_Omni(torch.autograd.Function):
 
 class CrossMerge_Omni(torch.autograd.Function):
     @staticmethod
+    # def forward(ctx, ys: torch.Tensor):
+    #     B, K, D, H, W = ys.shape
+    #     ctx.shape = (H, W)
+    #     ys = ys.view(B, K, D, -1) # (B K D L)
+
+    #     y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
+    #     # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
+    #     y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
+    #     y_rb = y_rb.view(B, -1, H, W)
+    #     # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
+    #     y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, D, -1)
+    #     # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
+    #     y_da = diagonal_scatter(y_da[:, 0], (B,D,H,W)) + antidiagonal_scatter(y_da[:, 1], (B,D,H,W))
+
+    #     y_res = y_rb + y_da
+    #     return y_res.view(B, D, -1)
+    @staticmethod
     def forward(ctx, ys: torch.Tensor):
+        # ys shape: (B, 8, D, H, W) — 8 directional tensors
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-        ys = ys.view(B, K, D, -1) # (B K D L)
 
-        y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-        # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
-        y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
-        y_rb = y_rb.view(B, -1, H, W)
-        # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
-        y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, D, -1)
-        # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
-        y_da = diagonal_scatter(y_da[:, 0], (B,D,H,W)) + antidiagonal_scatter(y_da[:, 1], (B,D,H,W))
+        # Merge all 8 directions using max pooling across dim=1 (the direction axis)
+        y_res, _ = torch.max(ys, dim=1)  # shape: (B, D, H, W)
 
-        y_res = y_rb + y_da
         return y_res.view(B, D, -1)
-        # return y
     
     @staticmethod
     def backward(ctx, x: torch.Tensor):
