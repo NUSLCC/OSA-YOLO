@@ -23,7 +23,7 @@ def parse_opt():
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch', type=int, default=16, help='batch size')
     parser.add_argument('--imgsz', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--cache', default='disk', help='cache images for faster training')
+    parser.add_argument('--cache', default=True, help='cache images for faster training')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1 or cpu')
     parser.add_argument('--workers', type=int, default=32, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--project', type=str, default=current_path+'/output_dir/mamba_yolo_attention', help='save to project/name')
