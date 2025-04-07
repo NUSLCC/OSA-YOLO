@@ -2,9 +2,12 @@ from ultralytics import YOLO
 import argparse
 import os
 import torch
+
+torch.cuda.device_count.cache_clear()
+
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_yolo12s_aug180'
+task_name = 'mambayolo_yolo12_0.33_aug180'
 
 from clearml import Task
 task = Task.init(project_name="mamba-yolo-regular", task_name=task_name)
@@ -15,14 +18,14 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', default='detect', help='train, val, test, speed or study')
     # Training settings
-    parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/12/yolo12s.yaml', help='model path(s)')
+    parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/12/yolo12n.yaml', help='model path(s)')
     parser.add_argument('--data', type=str, default=current_path+'/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
     parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--batch', type=int, default=64, help='batch size')
+    parser.add_argument('--batch', type=int, default=32, help='batch size')
     parser.add_argument('--imgsz', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--cache', default=True, help='cache images for faster training')
-    parser.add_argument('--device', default=[0,1,2,3], help='cuda device, i.e. 0 or 0,1 or cpu')
-    parser.add_argument('--workers', type=int, default=32, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--cache', default='disk', help='cache images for faster training')
+    parser.add_argument('--device', default=[0,1], help='cuda device, i.e. 0 or 0,1 or cpu')
+    parser.add_argument('--workers', type=int, default=4, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--project', type=str, default=current_path+'/output_dir/mamba_yolo_attention', help='save to project/name')
     parser.add_argument('--name', type=str, default=task_name, help='save to project/name')
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')
