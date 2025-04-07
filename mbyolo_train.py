@@ -7,7 +7,7 @@ torch.cuda.device_count.cache_clear()
 
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_omni_2442_maxpool_aug180'
+task_name = 'mambayolo_omni_2442_weights_aug180'
 
 from clearml import Task
 task = Task.init(project_name="mamba-yolo-omni", task_name=task_name)

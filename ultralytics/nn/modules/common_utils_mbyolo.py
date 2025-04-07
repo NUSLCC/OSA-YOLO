@@ -250,7 +250,7 @@ class CrossScan_Omni(torch.autograd.Function):
 
 
 class CrossMerge_Omni(torch.autograd.Function):
-    @staticmethod
+    # @staticmethod
     # def forward(ctx, ys: torch.Tensor):
     #     B, K, D, H, W = ys.shape
     #     ctx.shape = (H, W)
@@ -267,33 +267,43 @@ class CrossMerge_Omni(torch.autograd.Function):
 
     #     y_res = y_rb + y_da
     #     return y_res.view(B, D, -1)
+
     @staticmethod
-    def forward(ctx, ys: torch.Tensor):
-        # ys shape: (B, 8, D, H, W) — 8 directional tensors
+    def forward(ctx, ys: torch.Tensor, weights):
+        # ys shape: (B, 8, D, H, W)
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-
-        # Merge all 8 directions using max pooling across dim=1 (the direction axis)
-        y_res, _ = torch.max(ys, dim=1)  # shape: (B, D, H, W)
-
+        ctx.save_for_backward(weights)
+        w = torch.softmax(weights.to(ys.device), dim=0).view(1, K, 1, 1, 1)
+        y_res = (ys * w).sum(dim=1)  # (B, D, H, W)
         return y_res.view(B, D, -1)
-    
+
     @staticmethod
-    def backward(ctx, x: torch.Tensor):
-        # B, D, L = x.shape
-        # out: (b, k, d, l)
+    def backward(ctx, grad_output: torch.Tensor):
         H, W = ctx.shape
-        B, C, L = x.shape
-        xs = x.new_empty((B, 8, C, L))
-        # 横向和竖向扫描
-        xs[:, 0] = x
-        xs[:, 1] = x.view(B, C, H, W).transpose(dim0=2, dim1=3).flatten(2, 3)
+        B, C, L = grad_output.shape
+        weights, = ctx.saved_tensors
+
+        xs = grad_output.new_empty((B, 8, C, L))
+
+        # Directional reconstruction
+        xs[:, 0] = grad_output
+        xs[:, 1] = grad_output.view(B, C, H, W).transpose(2, 3).flatten(2, 3)
         xs[:, 2:4] = torch.flip(xs[:, 0:2], dims=[-1])
-        # 提供斜向和反斜向的扫描
-        xs[:, 4] = diagonal_gather(x.view(B,C,H,W))
-        xs[:, 5] = antidiagonal_gather(x.view(B,C,H,W))
+        xs[:, 4] = diagonal_gather(grad_output.view(B, C, H, W))
+        xs[:, 5] = antidiagonal_gather(grad_output.view(B, C, H, W))
         xs[:, 6:8] = torch.flip(xs[:, 4:6], dims=[-1])
-        return xs.view(B, 8, C, H, W)
+
+        # Apply softmax weights for gradient
+        w = torch.softmax(weights.to(xs.device), dim=0).view(1, 8, 1, 1)
+        grad_ys = xs * w  # (B, 8, C, L)
+
+        # If you want to learn the weights, you could compute grad_weights here
+        # For now, return None to skip updating weights via autograd
+        grad_weights = None
+
+        return grad_ys.view(B, 8, C, H, W), grad_weights
+
 
 
 class SelectiveScanCore(torch.autograd.Function):
@@ -717,6 +727,7 @@ def cross_selective_scan_omni_together(
     SelectiveScan=None,
     CrossScan=CrossScan_Omni,
     CrossMerge=CrossMerge_Omni,
+    weights=None,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -774,7 +785,7 @@ def cross_selective_scan_omni_together(
         xs, dts, As, Bs, Cs, Ds, delta_bias, delta_softplus
     ).view(B, K, -1, H, W)
     # ZSJ 这里把处理之后的序列融合起来，并还原回原来的矩阵形式
-    y: torch.Tensor = CrossMerge.apply(ys)
+    y: torch.Tensor = CrossMerge.apply(ys, weights)
 
     if out_norm_shape in ["v1"]: # (B, C, H, W)
         y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1) # (B, H, W, C)
