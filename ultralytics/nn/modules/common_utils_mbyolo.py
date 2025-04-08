@@ -250,60 +250,41 @@ class CrossScan_Omni(torch.autograd.Function):
 
 
 class CrossMerge_Omni(torch.autograd.Function):
-    # @staticmethod
-    # def forward(ctx, ys: torch.Tensor):
-    #     B, K, D, H, W = ys.shape
-    #     ctx.shape = (H, W)
-    #     ys = ys.view(B, K, D, -1) # (B K D L)
-
-    #     y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
-    #     # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
-    #     y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
-    #     y_rb = y_rb.view(B, -1, H, W)
-    #     # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
-    #     y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, D, -1)
-    #     # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
-    #     y_da = diagonal_scatter(y_da[:, 0], (B,D,H,W)) + antidiagonal_scatter(y_da[:, 1], (B,D,H,W))
-
-    #     y_res = y_rb + y_da
-    #     return y_res.view(B, D, -1)
-
     @staticmethod
-    def forward(ctx, ys: torch.Tensor, weights):
-        # ys shape: (B, 8, D, H, W)
+    def forward(ctx, ys: torch.Tensor):
         B, K, D, H, W = ys.shape
         ctx.shape = (H, W)
-        ctx.save_for_backward(weights)
-        w = torch.softmax(weights.to(ys.device), dim=0).view(1, K, 1, 1, 1)
-        y_res = (ys * w).sum(dim=1)  # (B, D, H, W)
+        ys = ys.view(B, K, D, -1) # (B K D L)
+
+        y_rb = ys[:, 0:2] + ys[:, 2:4].flip(dims=[-1]).view(B, 2, D, -1)
+        # 把竖向的部分转成横向，然后再相加,再转回最初是的矩阵形式
+        y_rb = y_rb[:, 0] + y_rb[:, 1].view(B, -1, W, H).transpose(dim0=2, dim1=3).contiguous().view(B, D, -1)
+        y_rb = y_rb.view(B, -1, H, W)
+        # 把斜向和反斜向的反向部分再反向回来，并和原来的斜向和反斜向相加
+        y_da = ys[:, 4:6] + ys[:, 6:8].flip(dims=[-1]).view(B, 2, D, -1)
+        # 把斜向和反斜向的部分都转成原来的最初的矩阵形式，再相加
+        y_da = diagonal_scatter(y_da[:, 0], (B,D,H,W)) + antidiagonal_scatter(y_da[:, 1], (B,D,H,W))
+
+        y_res = y_rb + y_da
         return y_res.view(B, D, -1)
-
+        # return y
+    
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):
+    def backward(ctx, x: torch.Tensor):
+        # B, D, L = x.shape
+        # out: (b, k, d, l)
         H, W = ctx.shape
-        B, C, L = grad_output.shape
-        weights, = ctx.saved_tensors
-
-        xs = grad_output.new_empty((B, 8, C, L))
-
-        # Directional reconstruction
-        xs[:, 0] = grad_output
-        xs[:, 1] = grad_output.view(B, C, H, W).transpose(2, 3).flatten(2, 3)
+        B, C, L = x.shape
+        xs = x.new_empty((B, 8, C, L))
+        # 横向和竖向扫描
+        xs[:, 0] = x
+        xs[:, 1] = x.view(B, C, H, W).transpose(dim0=2, dim1=3).flatten(2, 3)
         xs[:, 2:4] = torch.flip(xs[:, 0:2], dims=[-1])
-        xs[:, 4] = diagonal_gather(grad_output.view(B, C, H, W))
-        xs[:, 5] = antidiagonal_gather(grad_output.view(B, C, H, W))
+        # 提供斜向和反斜向的扫描
+        xs[:, 4] = diagonal_gather(x.view(B,C,H,W))
+        xs[:, 5] = antidiagonal_gather(x.view(B,C,H,W))
         xs[:, 6:8] = torch.flip(xs[:, 4:6], dims=[-1])
-
-        # Apply softmax weights for gradient
-        w = torch.softmax(weights.to(xs.device), dim=0).view(1, 8, 1, 1)
-        grad_ys = xs * w  # (B, 8, C, L)
-
-        # If you want to learn the weights, you could compute grad_weights here
-        # For now, return None to skip updating weights via autograd
-        grad_weights = None
-
-        return grad_ys.view(B, 8, C, H, W), grad_weights
-
+        return xs.view(B, 8, C, H, W)
 
 
 class SelectiveScanCore(torch.autograd.Function):
@@ -727,7 +708,6 @@ def cross_selective_scan_omni_together(
     SelectiveScan=None,
     CrossScan=CrossScan_Omni,
     CrossMerge=CrossMerge_Omni,
-    weights=None,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -785,7 +765,7 @@ def cross_selective_scan_omni_together(
         xs, dts, As, Bs, Cs, Ds, delta_bias, delta_softplus
     ).view(B, K, -1, H, W)
     # ZSJ 这里把处理之后的序列融合起来，并还原回原来的矩阵形式
-    y: torch.Tensor = CrossMerge.apply(ys, weights)
+    y: torch.Tensor = CrossMerge.apply(ys)
 
     if out_norm_shape in ["v1"]: # (B, C, H, W)
         y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1) # (B, H, W, C)

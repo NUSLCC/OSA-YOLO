@@ -1411,7 +1411,6 @@ class OSSM(nn.Module):
         self.d_conv = d_conv
         self.k_group = 8
         # self.directional_attention = DirectionalAttention_after_merge(in_channels=d_inner, num_directions=self.k_group)
-        self.weights = nn.Parameter(torch.randn(8))
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -1565,7 +1564,6 @@ class OSSM(nn.Module):
             out_norm_shape=getattr(self, "out_norm_shape", "v0"),
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
-            weights=self.weights,  # attention weights
         )
         
         # x = self.directional_attention(x)  # Apply attention

@@ -9,8 +9,8 @@ torch.use_deterministic_algorithms(True, warn_only=False)
 
 task_name = 'mambayolo_omni_2442_c2psa_backbone_p3_aug180'
 
-# from clearml import Task
-# task = Task.init(project_name="mamba-yolo-omni", task_name=task_name)
+from clearml import Task
+task = Task.init(project_name="mamba-yolo-omni", task_name=task_name)
 
 current_path = os.path.abspath(os.getcwd())
 
@@ -21,7 +21,7 @@ def parse_opt():
     parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni-C2PSA.yaml', help='model path(s)')
     parser.add_argument('--data', type=str, default=current_path+'/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
     parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--batch', type=int, default=14, help='batch size')
+    parser.add_argument('--batch', type=int, default=16, help='batch size')
     parser.add_argument('--imgsz', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--cache', default=True, help='cache images for faster training')
     parser.add_argument('--device', default=0, help='cuda device, i.e. 0 or 0,1 or cpu')
