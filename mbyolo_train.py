@@ -7,10 +7,10 @@ torch.cuda.device_count.cache_clear()
 
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_omni_2442_c2psa_backbone_p3_aug180'
+task_name = 'mambayolo_mixed_2v2o2o2v_aug180'
 
 from clearml import Task
-task = Task.init(project_name="mamba-yolo-omni", task_name=task_name)
+task = Task.init(project_name="mamba-yolo-ss2d-attention", task_name=task_name)
 
 current_path = os.path.abspath(os.getcwd())
 
@@ -18,7 +18,7 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', default='detect', help='train, val, test, speed or study')
     # Training settings
-    parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni-C2PSA.yaml', help='model path(s)')
+    parser.add_argument('--model', type=str, default=current_path+'/ultralytics/cfg/models/mamba-yolo/Mamba-YOLO-T-Omni-Mixed.yaml', help='model path(s)')
     parser.add_argument('--data', type=str, default=current_path+'/ultralytics/cfg/datasets/VisDrone.yaml', help='dataset.yaml path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch', type=int, default=16, help='batch size')

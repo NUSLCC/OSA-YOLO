@@ -404,7 +404,7 @@ class SS2D(nn.Module):
         D._no_weight_decay = True
         return D
 
-    def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan_ss2d, force_fp32=None):
+    def forward_corev2(self, x: torch.Tensor, channel_first=False, SelectiveScan=SelectiveScanCore, cross_selective_scan=cross_selective_scan, force_fp32=None):
         force_fp32 = (self.training and (not self.disable_force32)) if force_fp32 is None else force_fp32
         if not channel_first:
             x = x.permute(0, 3, 1, 2).contiguous()
@@ -418,15 +418,6 @@ class SS2D(nn.Module):
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
         )
-        # ys = cross_selective_scan(
-        #     x, self.x_proj_weight, None, self.dt_projs_weight, self.dt_projs_bias,
-        #     self.A_logs, self.Ds,
-        #     delta_softplus=True, to_dtype=True, force_fp32=force_fp32, # output fp32
-        #     ssoflex=self.training, SelectiveScan=SelectiveScan
-        # )
-        # ys_attn = self.directional_attention(ys)  # Apply attention
-        # x = cross_selective_merge_ss2d(ys=ys, ys_attn=ys_attn, out_norm=getattr(self, "out_norm", None), out_norm_shape=getattr(self, "out_norm_shape", "v0"))
-                
         if self.ssm_low_rank:
             x = self.out_rank(x)
         return x

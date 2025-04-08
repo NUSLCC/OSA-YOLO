@@ -357,20 +357,16 @@ def cross_selective_scan(
         dt_projs_bias: torch.Tensor = None,
         A_logs: torch.Tensor = None,
         Ds: torch.Tensor = None,
-        delta_softplus = True,
         out_norm: torch.nn.Module = None,
         out_norm_shape="v0",
-        # ==============================
+        nrows=-1,  # for SelectiveScanNRow
+        backnrows=-1,  # for SelectiveScanNRow
+        delta_softplus=True,
         to_dtype=True,
         force_fp32=False,  # False if ssoflex
-        # ==============================
-        nrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
-        backnrows=-1, # for SelectiveScanNRow; 0: auto; -1: disable;
-        ssoflex=True, # True: out fp32 in SSOflex; else, SSOflex is the same as SSCore
-        # ==============================
+        ssoflex=True,
         SelectiveScan=None,
-        CrossScan=CrossScan,
-        CrossMerge=CrossMerge,
+        scan_mode_type='default'
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -378,26 +374,6 @@ def cross_selective_scan(
     D, N = A_logs.shape
     K, D, R = dt_projs_weight.shape
     L = H * W
-
-    if nrows == 0:
-        if D % 4 == 0:
-            nrows = 4
-        elif D % 3 == 0:
-            nrows = 3
-        elif D % 2 == 0:
-            nrows = 2
-        else:
-            nrows = 1
-        
-    if backnrows == 0:
-        if D % 4 == 0:
-            backnrows = 4
-        elif D % 3 == 0:
-            backnrows = 3
-        elif D % 2 == 0:
-            backnrows = 2
-        else:
-            backnrows = 1
 
     def selective_scan(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
         return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
