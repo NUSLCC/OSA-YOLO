@@ -1,0 +1,39 @@
+
+nc: 10  # number of classes
+scales:   # [depth, width, max_channels]
+  T: [0.33, 0.25, 1024]  #Mamba-YOLOv8-T summary: 6.1M parameters,   14.0GFLOPs
+
+# Mamba-YOLO with C2PSA in backbone after P3
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, SimpleStem, [128, 3]]         # 0-P2/4
+  - [-1, 2, VSSBlock_Omni, [128]]         # 1
+  - [-1, 1, VisionClueMerge, [256]]       # 2-P3/8
+  - [-1, 4, VSSBlock_Omni, [256]]         # 3
+  - [-1, 1, C2PSA, [256]]                 # 4 ⬅️ C2PSA inserted here
+  - [-1, 1, VisionClueMerge, [512]]       # 5-P4/16
+  - [-1, 4, VSSBlock_Omni, [512]]         # 6
+  - [-1, 1, VisionClueMerge, [1024]]      # 7-P5/32
+  - [-1, 2, VSSBlock_Omni, [1024]]        # 8
+  - [-1, 1, SPPF, [1024, 5]]              # 9
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]     # 10
+  - [[-1, 6], 1, Concat, [1]]                      # 11 (cat P4)
+  - [-1, 2, XSSBlock_Omni, [512]]                  # 12
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]     # 13
+  - [[-1, 4], 1, Concat, [1]]                      # 14 (cat P3)
+  - [-1, 2, XSSBlock_Omni, [256]]                  # 15
+
+  - [-1, 1, Conv, [256, 3, 2]]                     # 16
+  - [[-1, 12], 1, Concat, [1]]                     # 17
+  - [-1, 2, XSSBlock_Omni, [512]]                  # 18
+
+  - [-1, 1, Conv, [512, 3, 2]]                     # 19
+  - [[-1, 9], 1, Concat, [1]]                      # 20
+  - [-1, 2, XSSBlock_Omni, [1024]]                 # 21
+
+  - [[15, 18, 21], 1, Detect, [nc]]                # 22 (P3, P4, P5)
+
