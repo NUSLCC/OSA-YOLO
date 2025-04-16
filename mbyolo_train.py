@@ -7,7 +7,7 @@ torch.cuda.device_count.cache_clear()
 
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_mixed_2v2o2o2v_aug180'
+task_name = 'mambayolo_mixed_2v4o4o2v_aug180'
 
 from clearml import Task
 task = Task.init(project_name="mamba-yolo-ss2d-attention", task_name=task_name)
@@ -24,12 +24,12 @@ def parse_opt():
     parser.add_argument('--batch', type=int, default=16, help='batch size')
     parser.add_argument('--imgsz', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--cache', default=True, help='cache images for faster training')
-    parser.add_argument('--device', default=0, help='cuda device, i.e. 0 or 0,1 or cpu')
+    parser.add_argument('--device', default=[1,2,3,4], help='cuda device, i.e. 0 or 0,1 or cpu')
     parser.add_argument('--workers', type=int, default=32, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--project', type=str, default=current_path+'/output_dir/mamba_yolo_attention', help='save to project/name')
     parser.add_argument('--name', type=str, default=task_name, help='save to project/name')
     parser.add_argument('--optimizer', default='SGD', help='SGD, Adam, AdamW')
-    parser.add_argument('--amp', default=True,  help='# Use automatic mixed precision')
+    parser.add_argument('--amp', default=True,  help='use automatic mixed precision')
     # Val settings
     parser.add_argument('--half', default=False, help='use FP16 half-precision inference')
     parser.add_argument('--dnn', default=False, help='use OpenCV DNN for ONNX inference')
