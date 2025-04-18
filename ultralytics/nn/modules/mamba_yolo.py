@@ -1,5 +1,5 @@
 from .common_utils_mbyolo import *
-__all__ = ("SimpleStem", "SimpleStem_New", "VisionClueMerge", "VisionClueMerge_New", "VSSBlock", "XSSBlock", "VSSBlock_Omni", "XSSBlock_Omni", "VSSBlock_Zig", "XSSBlock_Zig")
+__all__ = ("SimpleStem", "SimpleStem_Skip", "VisionClueMerge", "VisionClueMerge_New", "VSSBlock", "XSSBlock", "VSSBlock_Omni", "XSSBlock_Omni", "VSSBlock_Zig", "XSSBlock_Zig")
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,6 +22,24 @@ class SimpleStem(nn.Module):
         return self.conv(x)
 
 
+class SimpleStem_Skip(nn.Module):
+    def __init__(self, inp, embed_dim, ks=3):
+        super().__init__()
+        self.hidden_dims = embed_dim // 2
+        self.conv = nn.Sequential(
+            nn.Conv2d(inp, self.hidden_dims, kernel_size=ks, stride=2, padding=autopad(ks, d=1), bias=False),
+            nn.BatchNorm2d(self.hidden_dims),
+            nn.GELU(),
+            nn.Conv2d(self.hidden_dims, embed_dim, kernel_size=ks, stride=2, padding=autopad(ks, d=1), bias=False),
+            nn.BatchNorm2d(embed_dim),
+            nn.SiLU(),
+        )
+        self.skip = nn.Conv2d(inp, embed_dim, kernel_size=1, stride=4, bias=False)
+
+    def forward(self, x):
+        return self.conv(x) + self.skip(x)
+
+
 class VisionClueMerge(nn.Module):
     def __init__(self, dim, out_dim):
         super().__init__()
@@ -41,33 +59,6 @@ class VisionClueMerge(nn.Module):
             x[..., 1::2, 1::2]
         ], dim=1)
         return self.pw_linear(y)
-
-
-class SimpleStem_New(nn.Module):
-    def __init__(self, inp, embed_dim, ks=3):
-        super().__init__()
-        self.hidden_dim = embed_dim // 2
-        self.stem = nn.Sequential(
-            # Initial aggressive downsampling
-            nn.Conv2d(inp, self.hidden_dim, ks, stride=2, 
-                     padding=autopad(ks), bias=False),
-            nn.BatchNorm2d(self.hidden_dim),
-            nn.SiLU(),
-            
-            # Depthwise separable convolution with proper stride
-            nn.Conv2d(self.hidden_dim, self.hidden_dim, ks, stride=2,
-                     padding=autopad(ks), groups=self.hidden_dim, bias=False),
-            nn.BatchNorm2d(self.hidden_dim),
-            nn.SiLU(),
-            
-            # Channel expansion
-            nn.Conv2d(self.hidden_dim, embed_dim, 1, bias=False),
-            nn.BatchNorm2d(embed_dim),
-            nn.SiLU()  # Final activation after SE
-        )
-
-    def forward(self, x):
-        return self.stem(x)
 
 
 class VisionClueMerge_New(nn.Module):

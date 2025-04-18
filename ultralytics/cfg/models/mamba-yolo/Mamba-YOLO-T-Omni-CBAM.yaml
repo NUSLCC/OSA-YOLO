@@ -14,7 +14,7 @@ backbone:
   - [-1, 4, VSSBlock_Omni, [512]]               # 5
   - [-1, 1, VisionClueMerge, [1024]]            # 6 P5/32
   - [-1, 2, VSSBlock_Omni, [1024]]              # 7
-  - [-1, 1, CBAM, [256]]                        # 8 P6/64
+  - [-1, 1, CBAM, [1024]]                        # 8 P6/64
   - [-1, 1, SPPF, [1024, 5]]                    # 9
 
 # Mamba-YOLO PAFPN

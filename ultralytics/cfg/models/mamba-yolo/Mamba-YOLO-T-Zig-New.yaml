@@ -6,7 +6,7 @@ scales:   # [depth, width, max_channels]
 # Mamba-YOLO backbone 
 backbone:
   # [from, repeats, module, args]
-  - [-1, 1, SimpleStem_New, [128, 3]]         # 0-P2/4
+  - [-1, 1, SimpleStem_Skip, [128, 3]]         # 0-P2/4
   - [-1, 2, VSSBlock_Zig, [128]]          # 1
   - [-1, 1, VisionClueMerge_New, [256]]       # 2 p3/8
   - [-1, 4, VSSBlock_Zig, [256]]          # 3
