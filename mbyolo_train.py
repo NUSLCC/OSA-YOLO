@@ -7,10 +7,10 @@ torch.cuda.device_count.cache_clear()
 
 torch.use_deterministic_algorithms(True, warn_only=False)
 
-task_name = 'mambayolo_2v4o4o2v_2o2o2o2o_a2c2fadd_aug180'
+task_name = 'mambayolo_ss2d_2442_c2psaadd_aug180'
 
 from clearml import Task
-task = Task.init(project_name="mamba-yolo-omni", task_name=task_name)
+task = Task.init(project_name="mamba-yolo-ss2d-attention", task_name=task_name)
 
 current_path = os.path.abspath(os.getcwd())
 
