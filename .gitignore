@@ -7,6 +7,7 @@ output_dir
 ultralytics.egg-info
 docs
 examples
+runs/
 # C extensions
 *.so
 
