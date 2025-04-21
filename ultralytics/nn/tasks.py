@@ -49,7 +49,7 @@ from ultralytics.nn.modules import (
     Segment,
     WorldDetect,
     SimpleStem,
-    SimpleStem_New,
+    SimpleStem_Skip,
     VisionClueMerge,
     VisionClueMerge_New,
     VSSBlock,
@@ -64,6 +64,7 @@ from ultralytics.nn.modules import (
     C3k2,
     A2C2f,
     HybridMambaAA,
+    CBAM
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -911,7 +912,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             C3x,
             RepC3,
             PSA, C2PSA, C2fPSA,
-            SimpleStem, SimpleStem_New, VisionClueMerge, VisionClueMerge_New,
+            SimpleStem, SimpleStem_Skip, VisionClueMerge, VisionClueMerge_New,
             VSSBlock, VSSBlock_Omni, VSSBlock_Zig, 
             XSSBlock, XSSBlock_Omni, XSSBlock_Zig,
             C3k2,
@@ -928,7 +929,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 )  # num heads
 
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, XSSBlock, XSSBlock_Omni, XSSBlock_Zig, C3k2, A2C2f}:
+            if m in {BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, XSSBlock, XSSBlock_Omni, XSSBlock_Zig, C3k2, A2C2f, CBAM}:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is AIFI:

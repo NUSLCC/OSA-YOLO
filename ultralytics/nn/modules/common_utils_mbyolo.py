@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import math
 import numpy as np
 from functools import partial
@@ -356,9 +357,73 @@ def cross_selective_scan(
         dt_projs_bias: torch.Tensor = None,
         A_logs: torch.Tensor = None,
         Ds: torch.Tensor = None,
-        delta_softplus = True,
         out_norm: torch.nn.Module = None,
         out_norm_shape="v0",
+        nrows=-1,  # for SelectiveScanNRow
+        backnrows=-1,  # for SelectiveScanNRow
+        delta_softplus=True,
+        to_dtype=True,
+        force_fp32=False,  # False if ssoflex
+        ssoflex=True,
+        SelectiveScan=None,
+        scan_mode_type='default'
+):
+    # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
+
+    B, D, H, W = x.shape
+    D, N = A_logs.shape
+    K, D, R = dt_projs_weight.shape
+    L = H * W
+
+    def selective_scan(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
+        return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
+
+    xs = CrossScan.apply(x)
+
+    x_dbl = torch.einsum("b k d l, k c d -> b k c l", xs, x_proj_weight)
+    if x_proj_bias is not None:
+        x_dbl = x_dbl + x_proj_bias.view(1, K, -1, 1)
+    dts, Bs, Cs = torch.split(x_dbl, [R, N, N], dim=2)
+    dts = torch.einsum("b k r l, k d r -> b k d l", dts, dt_projs_weight)
+    xs = xs.view(B, -1, L)
+    dts = dts.contiguous().view(B, -1, L)
+    # HiPPO matrix
+    As = -torch.exp(A_logs.to(torch.float))  # (k * c, d_state)
+    Bs = Bs.contiguous()
+    Cs = Cs.contiguous()
+    Ds = Ds.to(torch.float)  # (K * c)
+    delta_bias = dt_projs_bias.view(-1).to(torch.float)
+
+    if force_fp32:
+        xs = xs.to(torch.float)
+        dts = dts.to(torch.float)
+        Bs = Bs.to(torch.float)
+        Cs = Cs.to(torch.float)
+
+    ys: torch.Tensor = selective_scan(
+        xs, dts, As, Bs, Cs, Ds, delta_bias, delta_softplus
+    ).view(B, K, -1, H, W)
+
+    y: torch.Tensor = CrossMerge.apply(ys)
+
+    if out_norm_shape in ["v1"]:  # (B, C, H, W)
+        y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1)  # (B, H, W, C)
+    else:  # (B, L, C)
+        y = y.transpose(dim0=1, dim1=2).contiguous()  # (B, L, C)
+        y = out_norm(y).view(B, H, W, -1)
+
+    return (y.to(x.dtype) if to_dtype else y)
+
+
+def cross_selective_scan_ss2d(
+        x: torch.Tensor = None,
+        x_proj_weight: torch.Tensor = None,
+        x_proj_bias: torch.Tensor = None,
+        dt_projs_weight: torch.Tensor = None,
+        dt_projs_bias: torch.Tensor = None,
+        A_logs: torch.Tensor = None,
+        Ds: torch.Tensor = None,
+        delta_softplus = True,
         # ==============================
         to_dtype=True,
         force_fp32=False,  # False if ssoflex
@@ -369,7 +434,6 @@ def cross_selective_scan(
         # ==============================
         SelectiveScan=None,
         CrossScan=CrossScan,
-        CrossMerge=CrossMerge,
 ):
     # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
 
@@ -427,15 +491,7 @@ def cross_selective_scan(
         xs, dts, As, Bs, Cs, Ds, delta_bias, delta_softplus
     ).view(B, K, -1, H, W)
 
-    y: torch.Tensor = CrossMerge.apply(ys)
-
-    if out_norm_shape in ["v1"]:  # (B, C, H, W)
-        y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1)  # (B, H, W, C)
-    else:  # (B, L, C)
-        y = y.transpose(dim0=1, dim1=2).contiguous()  # (B, L, C)
-        y = out_norm(y).view(B, H, W, -1)
-
-    return (y.to(x.dtype) if to_dtype else y)
+    return (ys.to(x.dtype) if to_dtype else ys)
 
 
 def cross_selective_scan_zigzag(
@@ -537,6 +593,84 @@ def cross_selective_scan_omni(
     A_logs: torch.Tensor=None,
     Ds: torch.Tensor=None,
     delta_softplus = True,
+    # ==============================
+    to_dtype=True, # True: final out to dtype
+    force_fp32=False, # True: input fp32
+    # ==============================
+    nrows = -1, # for SelectiveScanNRow; 0: auto; -1: disable;
+    backnrows = -1, # for SelectiveScanNRow; 0: auto; -1: disable;
+    ssoflex=True, # True: out fp32 in SSOflex; else, SSOflex is the same as SSCore
+    # ==============================
+    SelectiveScan=None,
+    CrossScan=CrossScan_Omni,
+):
+    # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
+    B, D, H, W = x.shape
+    D, N = A_logs.shape
+    K, D, R = dt_projs_weight.shape
+    L = H * W
+
+    if nrows == 0:
+        if D % 4 == 0:
+            nrows = 4
+        elif D % 3 == 0:
+            nrows = 3
+        elif D % 2 == 0:
+            nrows = 2
+        else:
+            nrows = 1
+        
+    if backnrows == 0:
+        if D % 4 == 0:
+            backnrows = 4
+        elif D % 3 == 0:
+            backnrows = 3
+        elif D % 2 == 0:
+            backnrows = 2
+        else:
+            backnrows = 1
+
+    def selective_scan(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
+        return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
+    
+    xs = CrossScan.apply(x)
+    
+    x_dbl = torch.einsum("b k d l, k c d -> b k c l", xs, x_proj_weight)
+    if x_proj_bias is not None:
+        x_dbl = x_dbl + x_proj_bias.view(1, K, -1, 1)
+    dts, Bs, Cs = torch.split(x_dbl, [R, N, N], dim=2)
+    dts = torch.einsum("b k r l, k d r -> b k d l", dts, dt_projs_weight)
+    xs = xs.view(B, -1, L)
+    dts = dts.contiguous().view(B, -1, L)
+    # HiPPO matrix
+    As = -torch.exp(A_logs.to(torch.float)) # (k * c, d_state)
+    Bs = Bs.contiguous()
+    Cs = Cs.contiguous()
+    Ds = Ds.to(torch.float) # (K * c)
+    delta_bias = dt_projs_bias.view(-1).to(torch.float)
+
+    if force_fp32:
+        xs = xs.to(torch.float)
+        dts = dts.to(torch.float)
+        Bs = Bs.to(torch.float)
+        Cs = Cs.to(torch.float)
+    # ZSJ 这里把矩阵拆分成不同方向的序列，并进行扫描
+    ys: torch.Tensor = selective_scan(
+        xs, dts, As, Bs, Cs, Ds, delta_bias, delta_softplus
+    ).view(B, K, -1, H, W)
+
+    return (ys.to(x.dtype) if to_dtype else ys)
+
+
+def cross_selective_scan_omni_together(
+    x: torch.Tensor=None, 
+    x_proj_weight: torch.Tensor=None,
+    x_proj_bias: torch.Tensor=None,
+    dt_projs_weight: torch.Tensor=None,
+    dt_projs_bias: torch.Tensor=None,
+    A_logs: torch.Tensor=None,
+    Ds: torch.Tensor=None,
+    delta_softplus = True,
     out_norm: torch.nn.Module=None,
     out_norm_shape="v0",
     # ==============================
@@ -616,6 +750,46 @@ def cross_selective_scan_omni(
         y = out_norm(y).view(B, H, W, -1)
 
     return (y.to(x.dtype) if to_dtype else y)
+
+
+def cross_selective_merge_ss2d(
+    ys: torch.Tensor=None, 
+    ys_attn: torch.Tensor=None,
+    out_norm: torch.nn.Module=None,
+    out_norm_shape="v0",
+    CrossMerge=CrossMerge,
+):
+    ys = ys * ys_attn  # Both: (B, 4, D, H, W) * (B, 4, 1, H, W)
+    B, K, D, H, W = ys.shape
+    # ZSJ 这里把处理之后的序列融合起来，并还原回原来的矩阵形式
+    y: torch.Tensor = CrossMerge.apply(ys)
+
+    if out_norm_shape in ["v1"]: # (B, C, H, W)
+        y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1) # (B, H, W, C)
+    else: # (B, L, C)
+        y = y.transpose(dim0=1, dim1=2).contiguous() # (B, L, C)
+        y = out_norm(y).view(B, H, W, -1)
+    return y
+
+
+def cross_selective_merge_omni(
+    ys: torch.Tensor=None, 
+    ys_attn: torch.Tensor=None,
+    out_norm: torch.nn.Module=None,
+    out_norm_shape="v0",
+    CrossMerge=CrossMerge_Omni,
+):
+    ys = ys * ys_attn  # Both: (B, 8, D, H, W) * (B, 8, 1, H, W)
+    B, K, D, H, W = ys.shape
+    # ZSJ 这里把处理之后的序列融合起来，并还原回原来的矩阵形式
+    y: torch.Tensor = CrossMerge.apply(ys)
+
+    if out_norm_shape in ["v1"]: # (B, C, H, W)
+        y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1) # (B, H, W, C)
+    else: # (B, L, C)
+        y = y.transpose(dim0=1, dim1=2).contiguous() # (B, L, C)
+        y = out_norm(y).view(B, H, W, -1)
+    return y
 
 
 def zigzag_path_lr(H, W, start_row=0, start_col=0, dir_row=1, dir_col=1):
